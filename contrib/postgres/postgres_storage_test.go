@@ -1,6 +1,7 @@
 package postgres_test
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
@@ -74,7 +75,7 @@ func TestMain(m *testing.M) {
 }
 
 func TestPostgres(t *testing.T) {
-	graph := zanzigo.TypeMap{
+	model := zanzigo.Model{
 		"user": zanzigo.RelationMap{},
 		"group": zanzigo.RelationMap{
 			"member": zanzigo.Rule{},
@@ -114,12 +115,15 @@ func TestPostgres(t *testing.T) {
 		},
 	}
 
-	storage, err := postgres.NewPostgresStorage("")
+	storage, err := postgres.NewPostgresStorage(databaseURL)
 	if err != nil {
 		t.Fatalf("Expected PostgresStorage to not error during creation: %v", err)
 	}
+	defer storage.Close()
 
-	err = storage.Write(zanzigo.Tuple{
+	ctx := context.Background()
+
+	err = storage.Write(ctx, zanzigo.Tuple{
 		Object:   "group:mygroup",
 		Relation: "member",
 		User:     "user:myuser",
@@ -128,7 +132,7 @@ func TestPostgres(t *testing.T) {
 		t.Fatalf("Expected storage.Write to not error: %v", err)
 	}
 
-	err = storage.Write(zanzigo.Tuple{
+	err = storage.Write(ctx, zanzigo.Tuple{
 		Object:   "doc:mydoc",
 		Relation: "parent",
 		User:     "folder:myfolder",
@@ -137,7 +141,7 @@ func TestPostgres(t *testing.T) {
 		t.Fatalf("Expected storage.Write to not error: %v", err)
 	}
 
-	err = storage.Write(zanzigo.Tuple{
+	err = storage.Write(ctx, zanzigo.Tuple{
 		Object:    "folder:myfolder",
 		Relation:  "viewer",
 		IsUserset: true,
@@ -149,12 +153,12 @@ func TestPostgres(t *testing.T) {
 
 	executer := zanzigo.NewSequentialExecuter()
 
-	resolver, err := graph.Resolver(storage, executer)
+	resolver, err := model.Resolver(storage, executer)
 	if err != nil {
 		t.Fatalf("Expected Resolver creation to not error on: %v", err)
 	}
 
-	result, err := resolver.Check(zanzigo.Tuple{
+	result, err := resolver.Check(ctx, zanzigo.Tuple{
 		Object:   "doc:mydoc",
 		Relation: "viewer",
 		User:     "user:myuser",

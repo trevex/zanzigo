@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"context"
 	"embed"
 
 	"github.com/trevex/zanzigo"
@@ -8,6 +9,7 @@ import (
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
+	"github.com/jackc/pgx/v4/pgxpool"
 )
 
 //go:embed migrations/*.sql
@@ -29,12 +31,24 @@ func RunMigrations(databaseURL string) error {
 	return nil
 }
 
-func NewPostgresStorage(connStr string) (zanzigo.Storage, error) {
-	return &postgresStorage{}, nil
+func NewPostgresStorage(databaseURL string) (zanzigo.Storage, error) {
+	pool, err := pgxpool.Connect(context.Background(), databaseURL)
+	if err != nil {
+		return nil, err
+	}
+	return &postgresStorage{pool}, nil
 }
 
-type postgresStorage struct{}
+type postgresStorage struct {
+	pool *pgxpool.Pool
+}
 
-func (s *postgresStorage) Write(t zanzigo.Tuple) error {
+func (s *postgresStorage) Close() error {
+	s.pool.Close()
 	return nil
+}
+
+func (s *postgresStorage) Write(ctx context.Context, t zanzigo.Tuple) error {
+	_, err := s.pool.Exec(ctx, "INSERT INTO tuples (object, relation, is_userset, user_) values($1, $2, $3, $4)", t.Object, t.Relation, t.IsUserset, t.User)
+	return err
 }

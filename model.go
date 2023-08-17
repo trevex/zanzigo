@@ -1,11 +1,13 @@
 package zanzigo
 
+import "context"
+
 const (
 	AnyOfPlaceholder = "anyOf"
 )
 
 // Inspired by https://docs.warrant.dev/concepts/object-types/
-type TypeMap map[string]RelationMap
+type Model map[string]RelationMap
 
 type RelationMap map[string]Rule
 
@@ -23,12 +25,19 @@ func AnyOf(rules ...Rule) Rule {
 	}
 }
 
-func (tm TypeMap) Resolver(storage Storage, executer Executer) (*Resolver, error) {
-	return &Resolver{}, nil
+func (model Model) Resolver(storage Storage, executer Executer) (*Resolver, error) {
+	// TODO: Check TypeMap for errors
+	return &Resolver{
+		model, storage, executer,
+	}, nil
 }
 
-type Resolver struct{}
+type Resolver struct {
+	model    Model
+	storage  Storage
+	executer Executer
+}
 
-func (r *Resolver) Check(t Tuple) (bool, error) {
+func (r *Resolver) Check(ctx context.Context, t Tuple) (bool, error) {
 	return true, nil
 }

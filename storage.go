@@ -1,5 +1,8 @@
 package zanzigo
 
+import "context"
+
 type Storage interface {
-	Write(t Tuple) error
+	Write(ctx context.Context, t Tuple) error
+	Close() error
 }
