@@ -3,12 +3,13 @@ package zanzigo
 // / ⟨tuple⟩ ::= ⟨object⟩‘#’⟨relation⟩‘@’⟨user⟩
 type Tuple struct {
 	/// ⟨object⟩ ::= ⟨namespace⟩‘:’⟨object id⟩
-	Object string `json:"object"`
+	ObjectType string `json:"object_type"`
+	ObjectID   string `json:"object_id"`
 	/// ⟨relation⟩
-	Relation string `json:"relation"`
-	/// Flag to indicate whether `.User` is a user or userset
-	IsUserset bool `json:"isUserset"`
+	ObjectRelation string `json:"relation"`
 	/// ⟨user⟩ ::= ⟨namespace⟩‘:’⟨user id⟩ | ⟨userset⟩
+	SubjectType string `json:"user_type"`
+	SubjectID   string `json:"user_id"`
 	/// ⟨userset⟩ ::= ⟨object⟩‘#’⟨relation⟩
-	User string `json:"user"`
+	SubjectRelation string `json:"user_relation"`
 }

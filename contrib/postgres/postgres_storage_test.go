@@ -1,6 +1,7 @@
 package postgres_test
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/trevex/zanzigo"
 	"github.com/trevex/zanzigo/contrib/postgres"
+	"golang.org/x/exp/slices"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/ory/dockertest/v3"
@@ -74,8 +76,8 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-func TestPostgres(t *testing.T) {
-	model := zanzigo.Model{
+func DefaultModel(t *testing.T) *zanzigo.Model {
+	model, err := zanzigo.NewModel(zanzigo.ObjectMap{
 		"user": zanzigo.RelationMap{},
 		"group": zanzigo.RelationMap{
 			"member": zanzigo.Rule{},
@@ -113,58 +115,112 @@ func TestPostgres(t *testing.T) {
 				},
 			),
 		},
+	})
+	if err != nil {
+		t.Fatalf("Model creation failed: %v", err)
 	}
+	return model
+}
+
+func DefaultData(t *testing.T, storage zanzigo.Storage) {
+	ctx := context.Background()
+
+	err := storage.Write(ctx, zanzigo.Tuple{
+		ObjectType:     "group",
+		ObjectID:       "mygroup",
+		ObjectRelation: "member",
+		SubjectType:    "user",
+		SubjectID:      "myuser",
+	})
+	if err != nil {
+		t.Fatalf("Expected storage.Write not to fail: %v", err)
+	}
+
+	err = storage.Write(ctx, zanzigo.Tuple{
+		ObjectType:     "doc",
+		ObjectID:       "mydoc",
+		ObjectRelation: "parent",
+		SubjectType:    "folder",
+		SubjectID:      "myfolder",
+	})
+	if err != nil {
+		t.Fatalf("Expected storage.Write not to fail: %v", err)
+	}
+
+	err = storage.Write(ctx, zanzigo.Tuple{
+		ObjectType:      "folder",
+		ObjectID:        "myfolder",
+		ObjectRelation:  "viewer",
+		SubjectType:     "group",
+		SubjectID:       "mygroup",
+		SubjectRelation: "member",
+	})
+	if err != nil {
+		t.Fatalf("Expected storage.Write not to fail: %v", err)
+	}
+}
+
+func TestPostgres(t *testing.T) {
+	// TODO: model := NewModel(t)
 
 	storage, err := postgres.NewPostgresStorage(databaseURL)
 	if err != nil {
-		t.Fatalf("Expected PostgresStorage to not error during creation: %v", err)
+		t.Fatalf("PostgresStorage creation failed: %v", err)
 	}
 	defer storage.Close()
 
+	// 	resolver, err := zanzigo.NewResolver(model, storage, runner)
+	// 	if err != nil {
+	// 		t.Fatalf("Expected Resolver creation to not error on: %v", err)
+	// 	}
+
+	// 	result, err := resolver.Check(ctx, zanzigo.Tuple{
+	// 		Object:   "doc:mydoc",
+	// 		Relation: "viewer",
+	// 		User:     "user:myuser",
+	// 	})
+	// 	if !result || err != nil {
+	// 		t.Fatalf("Expected resolver.Check to return true, nil, but got %v, %v instead", result, err)
+	// 	}
+
+}
+
+func TestPostgresQueryBuilding(t *testing.T) {
+	model := DefaultModel(t)
+
+	storage, err := postgres.NewPostgresStorage(databaseURL)
+	if err != nil {
+		t.Fatalf("PostgresStorage creation failed: %v", err)
+	}
+	defer storage.Close()
+	DefaultData(t, storage)
+
+	resolver, err := zanzigo.NewResolver(model, storage, 16)
+	commands := resolver.CommandsFor("doc", "viewer")
+	query := postgres.NewPostgresQuery(commands)
+	expectedQueryString := `(SELECT 0 AS command_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='doc' AND object_id=$1 AND (object_relation='editor' OR object_relation='owner' OR object_relation='viewer') AND subject_type=$2 AND subject_id=$3 AND subject_relation=$4) UNION ALL (SELECT 1 AS command_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='doc' AND object_id=$5 AND (object_relation='editor' OR object_relation='owner' OR object_relation='viewer') AND subject_relation IS NOT NULL) UNION ALL (SELECT 2 AS command_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='doc' AND object_id=$6 AND (object_relation='parent') AND subject_type='folder') ORDER BY command_id`
+	if query.Get() != expectedQueryString {
+		t.Fatalf("Expected computed query for commands to be `%s`, but got: %s", expectedQueryString, query.Get())
+	}
+
 	ctx := context.Background()
-
-	err = storage.Write(ctx, zanzigo.Tuple{
-		Object:   "group:mygroup",
-		Relation: "member",
-		User:     "user:myuser",
-	})
+	tuples, err := storage.RunQuery(ctx, zanzigo.QueryContext{Root: zanzigo.Tuple{
+		ObjectType:     "doc",
+		ObjectID:       "mydoc",
+		ObjectRelation: "viewer",
+		SubjectType:    "user",
+		SubjectID:      "myuser",
+	}}, query, commands)
 	if err != nil {
-		t.Fatalf("Expected storage.Write to not error: %v", err)
+		t.Fatalf("Expected query to not err: %v", err)
 	}
 
-	err = storage.Write(ctx, zanzigo.Tuple{
-		Object:   "doc:mydoc",
-		Relation: "parent",
-		User:     "folder:myfolder",
-	})
-	if err != nil {
-		t.Fatalf("Expected storage.Write to not error: %v", err)
+	expectedTuples := []zanzigo.MarkedTuple{
+		zanzigo.MarkedTuple{2, zanzigo.Tuple{"doc", "mydoc", "parent", "folder", "myfolder", ""}},
 	}
-
-	err = storage.Write(ctx, zanzigo.Tuple{
-		Object:    "folder:myfolder",
-		Relation:  "viewer",
-		IsUserset: true,
-		User:      "group:mygroup#member",
-	})
-	if err != nil {
-		t.Fatalf("Expected storage.Write to not error: %v", err)
+	if slices.CompareFunc(tuples, expectedTuples, func(a, b zanzigo.MarkedTuple) int {
+		return cmp.Compare(fmt.Sprintf("%v", a), fmt.Sprintf("%v", b))
+	}) != 0 {
+		t.Fatalf("Expected tuples %v, but got %v instead", expectedTuples, tuples)
 	}
-
-	executer := zanzigo.NewSequentialExecuter()
-
-	resolver, err := model.Resolver(storage, executer)
-	if err != nil {
-		t.Fatalf("Expected Resolver creation to not error on: %v", err)
-	}
-
-	result, err := resolver.Check(ctx, zanzigo.Tuple{
-		Object:   "doc:mydoc",
-		Relation: "viewer",
-		User:     "user:myuser",
-	})
-	if !result || err != nil {
-		t.Fatalf("Expected resolver.Check to return true, nil, but got %v, %v instead", result, err)
-	}
-
 }

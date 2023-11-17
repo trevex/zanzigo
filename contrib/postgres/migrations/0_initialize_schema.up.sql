@@ -45,13 +45,14 @@ Now to the actual tables:
 
 CREATE TABLE tuples (
     uuid UUID NOT NULL DEFAULT public.uuid_generate_v7(),
-    object TEXT NOT NULL,
-    relation TEXT NOT NULL,
-    user_ TEXT NOT NULL,
-    is_userset BOOLEAN NOT NULL,
-    PRIMARY KEY (object, relation, user_)
+    object_type TEXT NOT NULL,
+    object_id TEXT NOT NULL,
+    object_relation TEXT NOT NULL,
+    subject_type TEXT NOT NULL,
+    subject_id TEXT NOT NULL,
+    subject_relation TEXT NOT NULL,
+    PRIMARY KEY (object_type, object_id, object_relation, subject_type, subject_id, subject_relation)
 );
 
-CREATE INDEX idx_tuples_partial_user ON tuples (object, relation, user_, is_userset) WHERE is_userset = FALSE;
-CREATE INDEX idx_tuples_partial_userset ON tuples (object, relation, user_, is_userset) WHERE is_userset = TRUE;
+CREATE INDEX idx_tuple ON tuples (object_type, object_id, object_relation, subject_type, subject_id, subject_relation);
 CREATE UNIQUE INDEX idx_tuples_uuid ON tuples (uuid);
