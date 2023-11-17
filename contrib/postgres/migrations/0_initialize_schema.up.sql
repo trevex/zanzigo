@@ -55,4 +55,6 @@ CREATE TABLE tuples (
 );
 
 CREATE INDEX idx_tuple ON tuples (object_type, object_id, object_relation, subject_type, subject_id, subject_relation);
+CREATE INDEX idx_tuples_partial_for_usersets ON tuples (object_type, object_id, object_relation) WHERE subject_relation <> '';
+CREATE INDEX idx_tuples_partial_for_indirect ON tuples (object_type, object_id, subject_type);
 CREATE UNIQUE INDEX idx_tuples_uuid ON tuples (uuid);

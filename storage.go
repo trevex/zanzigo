@@ -12,11 +12,11 @@ var (
 )
 
 // Marker interface for
-type CheckQuery interface{}
+type Userdata any
 
-type CheckPayload struct {
+type CheckRequest struct {
 	Tuple    Tuple
-	Query    CheckQuery
+	Userdata Userdata
 	Commands []CheckCommand
 }
 
@@ -30,9 +30,9 @@ type Storage interface {
 	Write(ctx context.Context, t Tuple) error
 	Read(ctx context.Context, t Tuple) (uuid.UUID, error)
 
-	PrecomputeQueryForCheckCommands(commands []CheckCommand) CheckQuery
+	PrepareForCheckCommands(object, relation string, commands []CheckCommand) (Userdata, error)
 	// Returns MarkedTuples ordered by CommandID!
-	QueryChecks(ctx context.Context, checks []CheckPayload) ([]MarkedTuple, error)
+	QueryChecks(ctx context.Context, checks []CheckRequest) ([]MarkedTuple, error)
 
 	Close() error
 }

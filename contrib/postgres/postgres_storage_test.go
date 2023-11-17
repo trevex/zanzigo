@@ -84,7 +84,7 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-func DefaultModel(t *testing.T) *zanzigo.Model {
+func DefaultModel(t testing.TB) *zanzigo.Model {
 	model, err := zanzigo.NewModel(zanzigo.ObjectMap{
 		"user": zanzigo.RelationMap{},
 		"group": zanzigo.RelationMap{
@@ -166,54 +166,81 @@ func DefaultData(storage zanzigo.Storage) {
 	if err != nil {
 		log.Fatalf("Expected storage.Write not to fail: %v", err)
 	}
+
+	err = storage.Write(ctx, zanzigo.Tuple{
+		ObjectType:     "doc",
+		ObjectID:       "mydoc",
+		ObjectRelation: "owner",
+		SubjectType:    "user",
+		SubjectID:      "myowner",
+	})
+	if err != nil {
+		log.Fatalf("Expected storage.Write not to fail: %v", err)
+	}
 }
 
 func TestPostgresWithResolver(t *testing.T) {
 	model := DefaultModel(t)
 
-	storage, err := NewPostgresStorage(databaseURL)
-	if err != nil {
-		t.Fatalf("PostgresStorage creation failed: %v", err)
-	}
-	defer storage.Close()
+	runChecks := func(t testing.TB, s zanzigo.Storage) {
+		resolver, err := zanzigo.NewResolver(model, storage, 16)
+		if err != nil {
+			t.Fatalf("Expected Resolver creation to not error on: %v", err)
+		}
 
-	resolver, err := zanzigo.NewResolver(model, storage, 16)
-	if err != nil {
-		t.Fatalf("Expected Resolver creation to not error on: %v", err)
+		result, err := resolver.Check(context.Background(), zanzigo.Tuple{
+			ObjectType:     "doc",
+			ObjectID:       "mydoc",
+			ObjectRelation: "viewer",
+			SubjectType:    "user",
+			SubjectID:      "myuser",
+		})
+		if !result || err != nil {
+			t.Fatalf("Expected resolver.Check to return true, nil, but got %v, %v instead", result, err)
+		}
+
+		result, err = resolver.Check(context.Background(), zanzigo.Tuple{
+			ObjectType:     "doc",
+			ObjectID:       "mydoc",
+			ObjectRelation: "editor",
+			SubjectType:    "user",
+			SubjectID:      "myuser",
+		})
+		if result || err != nil {
+			t.Fatalf("Expected resolver.Check to return true, nil, but got %v, %v instead", result, err)
+		}
 	}
 
-	result, err := resolver.Check(context.Background(), zanzigo.Tuple{
-		ObjectType:     "doc",
-		ObjectID:       "mydoc",
-		ObjectRelation: "viewer",
-		SubjectType:    "user",
-		SubjectID:      "myuser",
+	t.Run("default", func(t *testing.T) {
+		runChecks(t, storage)
 	})
-	if !result || err != nil {
-		t.Fatalf("Expected resolver.Check to return true, nil, but got %v, %v instead", result, err)
-	}
+	t.Run("use_functions", func(t *testing.T) {
+		storageFn, err := NewPostgresStorage(databaseURL, UseFunctions())
+		if err != nil {
+			t.Fatalf("PostgresStorage creation failed: %v", err)
+		}
+		defer storageFn.Close()
+		runChecks(t, storageFn)
+	})
 
 }
 
 func TestPostgresQueryBuilding(t *testing.T) {
 	model := DefaultModel(t)
 
-	storage, err := NewPostgresStorage(databaseURL)
-	if err != nil {
-		t.Fatalf("PostgresStorage creation failed: %v", err)
-	}
-	defer storage.Close()
-
 	resolver, err := zanzigo.NewResolver(model, storage, 16)
+	if err != nil {
+		t.Fatalf("Resolver creation failed: %v", err)
+	}
 	commands := resolver.CheckCommandsFor("doc", "viewer")
-	query := NewPostgresCheckQuery(commands).(*postgresCheckQuery)
+	query := newPostgresQuery(commands)
 	expectedQueryString := `(SELECT 0 AS command_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='doc' AND object_id=$%d AND (object_relation='editor' OR object_relation='owner' OR object_relation='viewer') AND subject_type=$%d AND subject_id=$%d AND subject_relation=$%d) UNION ALL (SELECT 1 AS command_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='doc' AND object_id=$%d AND (object_relation='editor' OR object_relation='owner' OR object_relation='viewer') AND subject_relation <> '') UNION ALL (SELECT 2 AS command_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='doc' AND object_id=$%d AND (object_relation='parent') AND subject_type='folder')`
 	if query.query != expectedQueryString {
 		t.Fatalf("Expected computed query for commands to be `%s`, but got: %s", expectedQueryString, query.query)
 	}
 
 	ctx := context.Background()
-	tuples, err := storage.QueryChecks(ctx, []zanzigo.CheckPayload{{
+	tuples, err := storage.QueryChecks(ctx, []zanzigo.CheckRequest{{
 		Tuple: zanzigo.Tuple{
 			ObjectType:     "doc",
 			ObjectID:       "mydoc",
@@ -221,7 +248,7 @@ func TestPostgresQueryBuilding(t *testing.T) {
 			SubjectType:    "user",
 			SubjectID:      "myuser",
 		},
-		Query:    query,
+		Userdata: query,
 		Commands: commands,
 	}})
 	if err != nil {
@@ -236,4 +263,106 @@ func TestPostgresQueryBuilding(t *testing.T) {
 	}) != 0 {
 		t.Fatalf("Expected tuples %v, but got %v instead", expectedTuples, tuples)
 	}
+}
+
+func TestPostgresFunctionBuilding(t *testing.T) {
+	model := DefaultModel(t)
+
+	storageFn, err := NewPostgresStorage(databaseURL, UseFunctions())
+	if err != nil {
+		t.Fatalf("PostgresStorage creation failed: %v", err)
+	}
+	defer storageFn.Close()
+
+	resolver, err := zanzigo.NewResolver(model, storageFn, 16)
+	if err != nil {
+		t.Fatalf("Resolver creation failed: %v", err)
+	}
+
+	commands := resolver.CheckCommandsFor("doc", "viewer")
+
+	pgStorage := storageFn.(*postgresStorage)
+	query, err := pgStorage.newPostgresFunction("doc", "viewer", commands)
+	if err != nil {
+		t.Fatalf("failed to create postgres function: %v", err)
+	}
+	expectedQueryString := `SELECT * FROM zanzigo_doc_viewer($%d, $%d, $%d, $%d, $%d, $%d)`
+	if query.query != expectedQueryString {
+		t.Fatalf("Expected computed query for commands to be `%s`, but got: %s", expectedQueryString, query.query)
+	}
+}
+
+func BenchmarkResolverWithPostgres(b *testing.B) {
+	model := DefaultModel(b)
+	resolver, err := zanzigo.NewResolver(model, storage, 16)
+	if err != nil {
+		b.Fatalf("Resolver creation failed: %v", err)
+	}
+	// TODO: generate junk data?
+	b.Run("indirect_nested_4", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			_, err := resolver.Check(context.Background(), zanzigo.Tuple{
+				ObjectType:     "doc",
+				ObjectID:       "mydoc",
+				ObjectRelation: "viewer",
+				SubjectType:    "user",
+				SubjectID:      "myuser",
+			})
+			if err != nil {
+				b.Fatalf("resolver.Check failed: %v", err)
+			}
+		}
+	})
+	b.Run("direct", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			_, err := resolver.Check(context.Background(), zanzigo.Tuple{
+				ObjectType:     "doc",
+				ObjectID:       "mydoc",
+				ObjectRelation: "viewer",
+				SubjectType:    "user",
+				SubjectID:      "myowner",
+			})
+			if err != nil {
+				b.Fatalf("resolver.Check failed: %v", err)
+			}
+		}
+	})
+
+	storageFn, err := NewPostgresStorage(databaseURL, UseFunctions())
+	if err != nil {
+		b.Fatalf("PostgresStorage creation failed: %v", err)
+	}
+	defer storageFn.Close()
+	resolverFn, err := zanzigo.NewResolver(model, storageFn, 16)
+	if err != nil {
+		b.Fatalf("Resolver creation failed: %v", err)
+	}
+	b.Run("use_fn_indirect_nested_4", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			_, err := resolverFn.Check(context.Background(), zanzigo.Tuple{
+				ObjectType:     "doc",
+				ObjectID:       "mydoc",
+				ObjectRelation: "viewer",
+				SubjectType:    "user",
+				SubjectID:      "myuser",
+			})
+			if err != nil {
+				b.Fatalf("resolver.Check failed: %v", err)
+			}
+		}
+	})
+	b.Run("use_fn_direct", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			_, err := resolverFn.Check(context.Background(), zanzigo.Tuple{
+				ObjectType:     "doc",
+				ObjectID:       "mydoc",
+				ObjectRelation: "viewer",
+				SubjectType:    "user",
+				SubjectID:      "myowner",
+			})
+			if err != nil {
+				b.Fatalf("resolver.Check failed: %v", err)
+			}
+		}
+	})
 }

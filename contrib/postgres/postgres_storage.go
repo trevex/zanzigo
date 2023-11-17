@@ -38,7 +38,34 @@ func RunMigrations(databaseURL string) error {
 	return nil
 }
 
-func NewPostgresStorage(databaseURL string) (zanzigo.Storage, error) {
+type PostgresOption interface {
+	do(*postgresConfig)
+}
+
+type postgresConfig struct {
+	useFunctions bool
+}
+
+type postgresFunctionAdapter func(*postgresConfig)
+
+func (fn postgresFunctionAdapter) do(c *postgresConfig) {
+	fn(c)
+}
+
+// This was implemented as a test, but is significantly slower than raw queries.
+// TODO: remove when considered obsolete!
+func UseFunctions() PostgresOption {
+	return postgresFunctionAdapter(func(c *postgresConfig) { c.useFunctions = true })
+}
+
+type postgresStorage struct {
+	pool         *pgxpool.Pool
+	useFunctions bool
+}
+
+func NewPostgresStorage(databaseURL string, options ...PostgresOption) (zanzigo.Storage, error) {
+	opts := postgresConfig{}
+	lo.ForEach(options, func(o PostgresOption, _ int) { o.do(&opts) })
 	config, err := pgxpool.ParseConfig(databaseURL)
 	if err != nil {
 		return nil, err // TODO: wrap?
@@ -51,11 +78,7 @@ func NewPostgresStorage(databaseURL string) (zanzigo.Storage, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &postgresStorage{pool}, nil
-}
-
-type postgresStorage struct {
-	pool *pgxpool.Pool
+	return &postgresStorage{pool, opts.useFunctions}, nil
 }
 
 func (s *postgresStorage) Close() error {
@@ -78,16 +101,19 @@ func (s *postgresStorage) Read(ctx context.Context, t zanzigo.Tuple) (uuid.UUID,
 	return uuid, err
 }
 
-func (s *postgresStorage) PrecomputeQueryForCheckCommands(commands []zanzigo.CheckCommand) zanzigo.CheckQuery {
-	return NewPostgresCheckQuery(commands)
+func (s *postgresStorage) PrepareForCheckCommands(object, relation string, commands []zanzigo.CheckCommand) (zanzigo.Userdata, error) {
+	if !s.useFunctions {
+		return newPostgresQuery(commands), nil
+	}
+	return s.newPostgresFunction(object, relation, commands)
 }
 
-func (s *postgresStorage) QueryChecks(ctx context.Context, checks []zanzigo.CheckPayload) ([]zanzigo.MarkedTuple, error) {
+func (s *postgresStorage) QueryChecks(ctx context.Context, checks []zanzigo.CheckRequest) ([]zanzigo.MarkedTuple, error) {
 	argNum := 1
 	args := make([]any, 0) // TODO: precalculate by adding q.numArgs
 	checkQueries := make([]string, 0, len(checks))
 	for i, check := range checks {
-		q, ok := check.Query.(*postgresCheckQuery)
+		q, ok := check.Userdata.(*postgresQuery)
 		if !ok {
 			panic("malformed query data")
 		}
@@ -128,7 +154,8 @@ func (s *postgresStorage) QueryChecks(ctx context.Context, checks []zanzigo.Chec
 	return tuples, nil
 }
 
-func NewPostgresCheckQuery(commands []zanzigo.CheckCommand) zanzigo.CheckQuery {
+// Will precompute the query for the commands
+func newPostgresQuery(commands []zanzigo.CheckCommand) *postgresQuery {
 	parts := []string{}
 	j := 0
 	for id, command := range commands {
@@ -151,16 +178,37 @@ func NewPostgresCheckQuery(commands []zanzigo.CheckCommand) zanzigo.CheckQuery {
 			panic("unreachable")
 		}
 	}
-	return &postgresCheckQuery{
+	return &postgresQuery{
 		query:   strings.Join(parts, " UNION ALL "),
 		numArgs: j,
 	}
 }
 
-type postgresCheckQuery struct {
+type postgresQuery struct {
 	query   string
 	numArgs int
 }
+
+func (s *postgresStorage) newPostgresFunction(object, relation string, commands []zanzigo.CheckCommand) (*postgresQuery, error) {
+	query := newPostgresQuery(commands)
+	argNumbers := makeArgsRange(1, query.numArgs)
+	pgfuncName := "zanzigo_" + object + "_" + relation
+	pgfunc := "CREATE OR REPLACE FUNCTION " + pgfuncName + "(" +
+		strings.Join(lo.Map(argNumbers, func(_ any, n int) string { return fmt.Sprintf("arg%d TEXT", n+1) }), ", ") +
+		") RETURNS TABLE (command_id INT, object_type TEXT, object_id TEXT, object_relation TEXT, subject_type TEXT, subject_id TEXT, subject_relation TEXT) AS $$\n" + fmt.Sprintf(query.query, argNumbers...) + ";\n$$ LANGUAGE SQL;"
+	_, err := s.pool.Exec(context.Background(), pgfunc)
+	return &postgresQuery{
+		query:   "SELECT * FROM " + pgfuncName + "(" + strings.Join(lo.Map(argNumbers, func(_ any, n int) string { return "$%d" }), ", ") + ")",
+		numArgs: query.numArgs,
+	}, err
+}
+
+type postgresFunction struct {
+	query   string
+	numArgs int
+}
+
+// Create functions for the set of commands
 
 func makeArgsRange(min, max int) []any {
 	a := make([]any, max-min+1)

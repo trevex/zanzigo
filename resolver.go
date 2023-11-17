@@ -44,39 +44,44 @@ type CheckIndirectCommand struct {
 func (c *CheckIndirectCommand) Kind() CommandKind { return KindIndirect }
 func (c *CheckIndirectCommand) Rule() MergedRule  { return c.MergedRule }
 
-type CheckQueryAndCommands struct {
-	Query    CheckQuery
+type PreparedCommands struct {
+	Userdata Userdata
 	Commands []CheckCommand
 }
 
-type QueryMap map[string]map[string]CheckQueryAndCommands
+type CommandMap map[string]map[string]PreparedCommands
 
+// During creation a set of static commands are precomputed which will also be passed on to the [Storage]-backend via [Storage.PrepareForCheckCommands].
 type Resolver struct {
-	storage  Storage
-	queryMap QueryMap
-	maxDepth int
+	storage    Storage
+	commandMap CommandMap
+	maxDepth   int
 }
 
+// NewResolver creates a new resolver for the particular [Model] using the designated [Storage]-implementation.
+// The main purpose of the [Resolver] is to traverse the ReBAC-policies and check whether a [Tuple] is authorized or not.
+// During creation a set of static commands are precomputed which will also be passed on to the [Storage]-backend via [Storage.PrepareForCheckCommands].
 func NewResolver(model *Model, storage Storage, maxDepth int) (*Resolver, error) {
+	commandMap, err := prepareCommandMapForModel(model, storage)
 	return &Resolver{
-		storage, computeQueryMapForModel(model, storage), maxDepth,
-	}, nil
+		storage, commandMap, maxDepth,
+	}, err
 }
 
 func (r *Resolver) Check(ctx context.Context, t Tuple) (bool, error) {
-	qac, ok := r.queryMap[t.ObjectType][t.ObjectRelation]
+	pc, ok := r.commandMap[t.ObjectType][t.ObjectRelation]
 	if !ok {
 		return false, fmt.Errorf("failed to find %s > %s in query map", t.ObjectType, t.ObjectRelation)
 	}
 	depth := 0
-	return r.check(ctx, []CheckPayload{{
+	return r.check(ctx, []CheckRequest{{
 		Tuple:    t,
-		Query:    qac.Query,
-		Commands: qac.Commands,
+		Userdata: pc.Userdata,
+		Commands: pc.Commands,
 	}}, depth)
 }
 
-func (r *Resolver) check(ctx context.Context, checks []CheckPayload, depth int) (bool, error) {
+func (r *Resolver) check(ctx context.Context, checks []CheckRequest, depth int) (bool, error) {
 	if len(checks) == 0 {
 		return false, nil
 	}
@@ -90,7 +95,7 @@ func (r *Resolver) check(ctx context.Context, checks []CheckPayload, depth int) 
 		return false, err
 	}
 
-	nextChecks := []CheckPayload{}
+	nextChecks := []CheckRequest{}
 	// Returned marked tuples are ordered by .CommandID and commands are ordered with directs first,
 	// so we can exit early if we find a direct relationship.
 	for _, mt := range markedTuples {
@@ -100,14 +105,14 @@ func (r *Resolver) check(ctx context.Context, checks []CheckPayload, depth int) 
 		case KindDirect:
 			return true, nil
 		case KindDirectUserset:
-			qac, ok := r.queryMap[mt.SubjectType][mt.SubjectRelation]
+			pc, ok := r.commandMap[mt.SubjectType][mt.SubjectRelation]
 			if !ok {
 				fmt.Println(cp)
 				fmt.Println(command.Kind())
 				fmt.Println(mt)
 				return false, fmt.Errorf("failed to find %s > %s in query map", mt.SubjectType, mt.SubjectRelation)
 			}
-			nextChecks = append(nextChecks, CheckPayload{
+			nextChecks = append(nextChecks, CheckRequest{
 				Tuple: Tuple{
 					ObjectType:      mt.SubjectType,
 					ObjectID:        mt.SubjectID,
@@ -116,20 +121,20 @@ func (r *Resolver) check(ctx context.Context, checks []CheckPayload, depth int) 
 					SubjectID:       cp.Tuple.SubjectID,
 					SubjectRelation: cp.Tuple.SubjectRelation,
 				},
-				Query:    qac.Query,
-				Commands: qac.Commands,
+				Userdata: pc.Userdata,
+				Commands: pc.Commands,
 			})
 		case KindIndirect: // TODO: THIS CAN BE USERSET!?
 			relations := command.Rule().WithRelationToSubject
 			for _, relation := range relations {
-				qac, ok := r.queryMap[mt.SubjectType][relation]
+				pc, ok := r.commandMap[mt.SubjectType][relation]
 				if !ok {
 					fmt.Println(cp)
 					fmt.Println(mt)
 					fmt.Println(relation)
 					return false, fmt.Errorf("failed to find %s > %s in query map", mt.SubjectType, relation)
 				}
-				nextChecks = append(nextChecks, CheckPayload{
+				nextChecks = append(nextChecks, CheckRequest{
 					Tuple: Tuple{
 						ObjectType:      mt.SubjectType,
 						ObjectID:        mt.SubjectID,
@@ -138,8 +143,8 @@ func (r *Resolver) check(ctx context.Context, checks []CheckPayload, depth int) 
 						SubjectID:       cp.Tuple.SubjectID,
 						SubjectRelation: cp.Tuple.SubjectRelation,
 					},
-					Query:    qac.Query,
-					Commands: qac.Commands,
+					Userdata: pc.Userdata,
+					Commands: pc.Commands,
 				})
 			}
 		default:
@@ -151,14 +156,14 @@ func (r *Resolver) check(ctx context.Context, checks []CheckPayload, depth int) 
 }
 
 func (r *Resolver) CheckCommandsFor(object, relation string) []CheckCommand {
-	return r.queryMap[object][relation].Commands
+	return r.commandMap[object][relation].Commands
 }
 
-func computeQueryMapForModel(model *Model, storage Storage) QueryMap {
+func prepareCommandMapForModel(model *Model, storage Storage) (CommandMap, error) {
 	// Let's create the commands first
-	queryMap := QueryMap{}
+	commandMap := CommandMap{}
 	for object, relations := range model.MergedRules {
-		queryMap[object] = map[string]CheckQueryAndCommands{}
+		commandMap[object] = map[string]PreparedCommands{}
 		for relation, rules := range relations {
 			commands := []CheckCommand{}
 			for _, rule := range rules {
@@ -169,13 +174,17 @@ func computeQueryMapForModel(model *Model, storage Storage) QueryMap {
 				}
 			}
 			commands = sortCommands(commands)
-			queryMap[object][relation] = CheckQueryAndCommands{
-				Query:    storage.PrecomputeQueryForCheckCommands(commands),
+			userdata, err := storage.PrepareForCheckCommands(object, relation, commands)
+			if err != nil {
+				return nil, err
+			}
+			commandMap[object][relation] = PreparedCommands{
+				Userdata: userdata,
 				Commands: commands,
 			}
 		}
 	}
-	return queryMap
+	return commandMap, nil
 }
 
 func sortCommands(commands []CheckCommand) []CheckCommand {
