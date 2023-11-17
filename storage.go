@@ -11,16 +11,17 @@ var (
 	ErrNotFound = errors.New("not found")
 )
 
-type Query interface {
-	Get() string
-	NumArgs() int
-}
+// Marker interface for
+type CheckQuery interface{}
 
-type QueryContext struct {
-	Root Tuple // TODO: simplify?
+type CheckPayload struct {
+	Tuple    Tuple
+	Query    CheckQuery
+	Commands []CheckCommand
 }
 
 type MarkedTuple struct {
+	CheckID   int
 	CommandID int
 	Tuple
 }
@@ -29,9 +30,9 @@ type Storage interface {
 	Write(ctx context.Context, t Tuple) error
 	Read(ctx context.Context, t Tuple) (uuid.UUID, error)
 
-	QueryForCommands(commands []Command) Query
+	PrecomputeQueryForCheckCommands(commands []CheckCommand) CheckQuery
 	// Returns MarkedTuples ordered by CommandID!
-	RunQuery(ctx context.Context, qc QueryContext, q Query, commands []Command) ([]MarkedTuple, error)
+	QueryChecks(ctx context.Context, checks []CheckPayload) ([]MarkedTuple, error)
 
 	Close() error
 }

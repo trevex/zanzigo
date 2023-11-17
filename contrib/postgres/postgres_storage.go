@@ -15,7 +15,6 @@ import (
 	"github.com/golang-migrate/migrate/v4/source/iofs"
 	pgxuuid "github.com/jackc/pgx-gofrs-uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype/zeronull"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/samber/lo"
 )
@@ -79,35 +78,48 @@ func (s *postgresStorage) Read(ctx context.Context, t zanzigo.Tuple) (uuid.UUID,
 	return uuid, err
 }
 
-func (s *postgresStorage) QueryForCommands(commands []zanzigo.Command) zanzigo.Query {
-	return NewPostgresQuery(commands)
+func (s *postgresStorage) PrecomputeQueryForCheckCommands(commands []zanzigo.CheckCommand) zanzigo.CheckQuery {
+	return NewPostgresCheckQuery(commands)
 }
 
-func (s *postgresStorage) RunQuery(ctx context.Context, qc zanzigo.QueryContext, q zanzigo.Query, commands []zanzigo.Command) ([]zanzigo.MarkedTuple, error) {
-	args := make([]any, 0, q.NumArgs())
-	for _, command := range commands {
-		switch command.Kind() { // NEEDS TO BE IN SYNC WITH `NewPostgresQuery`
-		case zanzigo.KindDirect:
-			args = append(args, qc.Root.ObjectID, qc.Root.SubjectType, qc.Root.SubjectID, zeronull.Text(qc.Root.SubjectRelation))
-		case zanzigo.KindDirectUserset:
-			args = append(args, qc.Root.ObjectID)
-		case zanzigo.KindIndirect:
-			args = append(args, qc.Root.ObjectID)
-		default:
-			panic("unreachable")
+func (s *postgresStorage) QueryChecks(ctx context.Context, checks []zanzigo.CheckPayload) ([]zanzigo.MarkedTuple, error) {
+	argNum := 1
+	args := make([]any, 0) // TODO: precalculate by adding q.numArgs
+	checkQueries := make([]string, 0, len(checks))
+	for i, check := range checks {
+		q, ok := check.Query.(*postgresCheckQuery)
+		if !ok {
+			panic("malformed query data")
 		}
+		for _, command := range check.Commands {
+			switch command.Kind() { // NEEDS TO BE IN SYNC WITH `NewPostgresCheckQuery`
+			case zanzigo.KindDirect:
+				args = append(args, check.Tuple.ObjectID, check.Tuple.SubjectType, check.Tuple.SubjectID, check.Tuple.SubjectRelation)
+			case zanzigo.KindDirectUserset:
+				args = append(args, check.Tuple.ObjectID)
+			case zanzigo.KindIndirect:
+				args = append(args, check.Tuple.ObjectID)
+			default:
+				panic("unreachable")
+			}
+		}
+		if len(args) != argNum+q.numArgs-1 {
+			return nil, errors.New("args for query do not match expected number of args")
+		}
+		checkQueries = append(checkQueries, fmt.Sprintf("SELECT %d AS check_id", i)+", command_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM ("+fmt.Sprintf(q.query, makeArgsRange(argNum, argNum+q.numArgs-1)...)+fmt.Sprintf(") AS check%d", i))
+		argNum += q.numArgs
 	}
-	if len(args) != q.NumArgs() {
-		return nil, errors.New("args for query do not match expected number of args")
-	}
-	rows, err := s.pool.Query(ctx, q.Get(), args...)
+
+	fullQuery := strings.Join(checkQueries, " UNION ALL ") + " ORDER BY command_id"
+
+	rows, err := s.pool.Query(ctx, fullQuery, args...)
 	if err != nil {
 		return nil, err
 	}
 	tuples := []zanzigo.MarkedTuple{}
 	for rows.Next() {
 		t := zanzigo.MarkedTuple{}
-		err := rows.Scan(&t.CommandID, &t.ObjectType, &t.ObjectID, &t.ObjectRelation, &t.SubjectType, &t.SubjectID, &t.SubjectRelation)
+		err := rows.Scan(&t.CheckID, &t.CommandID, &t.ObjectType, &t.ObjectID, &t.ObjectRelation, &t.SubjectType, &t.SubjectID, &t.SubjectRelation)
 		if err != nil {
 			return nil, err
 		}
@@ -116,9 +128,9 @@ func (s *postgresStorage) RunQuery(ctx context.Context, qc zanzigo.QueryContext,
 	return tuples, nil
 }
 
-func NewPostgresQuery(commands []zanzigo.Command) zanzigo.Query {
+func NewPostgresCheckQuery(commands []zanzigo.CheckCommand) zanzigo.CheckQuery {
 	parts := []string{}
-	j := 1
+	j := 0
 	for id, command := range commands {
 		rule := command.Rule()
 		relations := "(" + strings.Join(lo.Map(command.Rule().Relations, func(r string, _ int) string {
@@ -127,31 +139,33 @@ func NewPostgresQuery(commands []zanzigo.Command) zanzigo.Query {
 		switch command.Kind() { // NEEDS TO BE IN SYNC WITH `postgresStorage.RunQuery`
 		case zanzigo.KindDirect:
 			// NOTE: we need to be careful with `subject_relation` to handle NULL properly!
-			parts = append(parts, fmt.Sprintf("(SELECT %d AS command_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='%s' AND object_id=$%d AND %s AND subject_type=$%d AND subject_id=$%d AND subject_relation=$%d)", id, rule.Object, j, relations, j+1, j+2, j+3))
+			parts = append(parts, fmt.Sprintf("(SELECT %d AS command_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='%s' AND object_id=$%%d AND %s AND subject_type=$%%d AND subject_id=$%%d AND subject_relation=$%%d)", id, rule.Object, relations))
 			j += 4
 		case zanzigo.KindDirectUserset:
-			parts = append(parts, fmt.Sprintf("(SELECT %d AS command_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='%s' AND object_id=$%d AND %s AND subject_relation IS NOT NULL)", id, rule.Object, j, relations))
+			parts = append(parts, fmt.Sprintf("(SELECT %d AS command_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='%s' AND object_id=$%%d AND %s AND subject_relation <> '')", id, rule.Object, relations))
 			j += 1
 		case zanzigo.KindIndirect:
-			parts = append(parts, fmt.Sprintf("(SELECT %d AS command_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='%s' AND object_id=$%d AND %s AND subject_type='%s')", id, rule.Object, j, relations, rule.Subject))
+			parts = append(parts, fmt.Sprintf("(SELECT %d AS command_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='%s' AND object_id=$%%d AND %s AND subject_type='%s')", id, rule.Object, relations, rule.Subject))
+			j += 1
 		default:
 			panic("unreachable")
 		}
 	}
-	return &postgresQuery{
-		query:   strings.Join(parts, " UNION ALL ") + " ORDER BY command_id",
+	return &postgresCheckQuery{
+		query:   strings.Join(parts, " UNION ALL "),
 		numArgs: j,
 	}
 }
 
-type postgresQuery struct {
+type postgresCheckQuery struct {
 	query   string
 	numArgs int
 }
 
-func (q *postgresQuery) Get() string {
-	return q.query
-}
-func (q *postgresQuery) NumArgs() int {
-	return q.numArgs
+func makeArgsRange(min, max int) []any {
+	a := make([]any, max-min+1)
+	for i := range a {
+		a[i] = min + i
+	}
+	return a
 }

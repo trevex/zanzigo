@@ -3,6 +3,7 @@ package zanzigo
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 )
 
@@ -15,7 +16,7 @@ const (
 	KindIndirect
 )
 
-type Command interface {
+type CheckCommand interface {
 	Kind() CommandKind
 	Rule() MergedRule
 }
@@ -43,12 +44,12 @@ type CheckIndirectCommand struct {
 func (c *CheckIndirectCommand) Kind() CommandKind { return KindIndirect }
 func (c *CheckIndirectCommand) Rule() MergedRule  { return c.MergedRule }
 
-type QueryAndCommands struct {
-	Query    Query
-	Commands []Command
+type CheckQueryAndCommands struct {
+	Query    CheckQuery
+	Commands []CheckCommand
 }
 
-type QueryMap map[string]map[string]QueryAndCommands
+type QueryMap map[string]map[string]CheckQueryAndCommands
 
 type Resolver struct {
 	storage  Storage
@@ -63,34 +64,93 @@ func NewResolver(model *Model, storage Storage, maxDepth int) (*Resolver, error)
 }
 
 func (r *Resolver) Check(ctx context.Context, t Tuple) (bool, error) {
-	qc := QueryContext{t}
+	qac, ok := r.queryMap[t.ObjectType][t.ObjectRelation]
+	if !ok {
+		return false, fmt.Errorf("failed to find %s > %s in query map", t.ObjectType, t.ObjectRelation)
+	}
 	depth := 0
-	return r.check(ctx, qc, depth)
+	return r.check(ctx, []CheckPayload{{
+		Tuple:    t,
+		Query:    qac.Query,
+		Commands: qac.Commands,
+	}}, depth)
 }
 
-func (r *Resolver) check(ctx context.Context, qc QueryContext, depth int) (bool, error) {
+func (r *Resolver) check(ctx context.Context, checks []CheckPayload, depth int) (bool, error) {
+	if len(checks) == 0 {
+		return false, nil
+	}
 	if depth > r.maxDepth {
 		return false, errors.New("max depth exceeded")
 	}
 	depth += 1
-	qac := r.queryMap[qc.Root.ObjectType][qc.Root.ObjectRelation]
-	markedTuples, err := r.storage.RunQuery(ctx, qc, qac.Query, qac.Commands)
+
+	markedTuples, err := r.storage.QueryChecks(ctx, checks)
 	if err != nil {
 		return false, err
 	}
 
-	// Tuples are ordered by .CommandID and commands are ordered with directs first,
-	// so we can exit early if we find a direct relationship
+	nextChecks := []CheckPayload{}
+	// Returned marked tuples are ordered by .CommandID and commands are ordered with directs first,
+	// so we can exit early if we find a direct relationship.
 	for _, mt := range markedTuples {
-		command := qac.Commands[mt.CommandID]
-		if command.Kind() == KindDirect {
+		cp := checks[mt.CheckID]
+		command := cp.Commands[mt.CommandID]
+		switch command.Kind() {
+		case KindDirect:
 			return true, nil
+		case KindDirectUserset:
+			qac, ok := r.queryMap[mt.SubjectType][mt.SubjectRelation]
+			if !ok {
+				fmt.Println(cp)
+				fmt.Println(command.Kind())
+				fmt.Println(mt)
+				return false, fmt.Errorf("failed to find %s > %s in query map", mt.SubjectType, mt.SubjectRelation)
+			}
+			nextChecks = append(nextChecks, CheckPayload{
+				Tuple: Tuple{
+					ObjectType:      mt.SubjectType,
+					ObjectID:        mt.SubjectID,
+					ObjectRelation:  mt.SubjectRelation,
+					SubjectType:     cp.Tuple.SubjectType,
+					SubjectID:       cp.Tuple.SubjectID,
+					SubjectRelation: cp.Tuple.SubjectRelation,
+				},
+				Query:    qac.Query,
+				Commands: qac.Commands,
+			})
+		case KindIndirect: // TODO: THIS CAN BE USERSET!?
+			relations := command.Rule().WithRelationToSubject
+			for _, relation := range relations {
+				qac, ok := r.queryMap[mt.SubjectType][relation]
+				if !ok {
+					fmt.Println(cp)
+					fmt.Println(mt)
+					fmt.Println(relation)
+					return false, fmt.Errorf("failed to find %s > %s in query map", mt.SubjectType, relation)
+				}
+				nextChecks = append(nextChecks, CheckPayload{
+					Tuple: Tuple{
+						ObjectType:      mt.SubjectType,
+						ObjectID:        mt.SubjectID,
+						ObjectRelation:  relation,
+						SubjectType:     cp.Tuple.SubjectType,
+						SubjectID:       cp.Tuple.SubjectID,
+						SubjectRelation: cp.Tuple.SubjectRelation,
+					},
+					Query:    qac.Query,
+					Commands: qac.Commands,
+				})
+			}
+		default:
+			panic("unreachable")
 		}
 	}
-	return true, nil
+
+	return r.check(ctx, nextChecks, depth)
 }
 
-func (r *Resolver) CommandsFor(object, relation string) []Command {
+func (r *Resolver) CheckCommandsFor(object, relation string) []CheckCommand {
 	return r.queryMap[object][relation].Commands
 }
 
@@ -98,9 +158,9 @@ func computeQueryMapForModel(model *Model, storage Storage) QueryMap {
 	// Let's create the commands first
 	queryMap := QueryMap{}
 	for object, relations := range model.MergedRules {
-		queryMap[object] = map[string]QueryAndCommands{}
+		queryMap[object] = map[string]CheckQueryAndCommands{}
 		for relation, rules := range relations {
-			commands := []Command{}
+			commands := []CheckCommand{}
 			for _, rule := range rules {
 				if len(rule.WithRelationToSubject) > 0 { // INDIRECT
 					commands = append(commands, &CheckIndirectCommand{rule})
@@ -109,8 +169,8 @@ func computeQueryMapForModel(model *Model, storage Storage) QueryMap {
 				}
 			}
 			commands = sortCommands(commands)
-			queryMap[object][relation] = QueryAndCommands{
-				Query:    storage.QueryForCommands(commands),
+			queryMap[object][relation] = CheckQueryAndCommands{
+				Query:    storage.PrecomputeQueryForCheckCommands(commands),
 				Commands: commands,
 			}
 		}
@@ -118,81 +178,9 @@ func computeQueryMapForModel(model *Model, storage Storage) QueryMap {
 	return queryMap
 }
 
-func sortCommands(commands []Command) []Command {
-	slices.SortFunc(commands, func(a, b Command) int {
+func sortCommands(commands []CheckCommand) []CheckCommand {
+	slices.SortFunc(commands, func(a, b CheckCommand) int {
 		return int(a.Kind()) - int(b.Kind())
 	})
 	return commands
 }
-
-// func (r *Resolver) getCommands(checkTuple Tuple, targetUser string) []Cmd {
-// 	rule := r.model[checkTuple.Object][checkTuple.Relation]
-// 	return append([]Cmd{Cmd{
-// 		CheckTuple: checkTuple,
-// 		TargetUser: targetUser,
-// 	}}, r.getCommandsForRule(rule, targetUser)...)
-
-// }
-
-// func (r *Resolver) getCommandsForRule(rule Rule, targetUser string) []Cmd {
-// 	if rule.InheritIf == AnyOfPlaceholder {
-
-// 	}
-// }
-
-// func (r *Resolver) execsForTuple(ctx context.Context, t Tuple, rule Rule) []ExecFn {
-// 	execs := []ExecFn{} // TODO: capacity?
-
-// 	// Read the tuple itself
-// 	execs := append(execs, func() (bool, []Tuple, error) {
-// 		_, err := r.storage.Read(t)
-// 		if err == ErrNotFound {
-// 			return false, nil, nil
-// 		} else if err != nil {
-// 			return false, nil, err
-// 		}
-// 		return true, nil, nil
-// 	})
-
-// 	// Let's check the rule
-// 	if rule.InheritIf == AnyOfPlaceholder { // Multiple rules
-// 		tuples := []Tuple{} // TODO: reserve capacity
-// 		for _, subrule := range rule.Rules {
-// 			execs = append(execs, r.execsForTuple(ctx, Tuple{}, subrule))...
-// 			tuples = append(tuples, r.tuplesForRule(t, subrule)...)
-// 		}
-// 		return tuples
-
-// 	} else if rule.InheritIf != "" { // Single rule
-// 		// Rule references other type
-// 		if rule.OfType != "" && rule.WithRelation != "" {
-// 			relations := r.model[rule.OfType]
-// 			relrule := relations[]
-
-// 		}
-
-// 		// TODO: get indirect tuples
-// 	}
-
-// }
-
-// func (r *Resolver) tuplesForRule(t Tuple, rule Rule) []Tuple {
-// 	if rule.InheritIf == AnyOfPlaceholder { // Multiple rules
-// 		tuples := []Tuple{} // TODO: reserve capacity
-// 		for _, subrule := range rule.Rules {
-// 			tuples = append(tuples, r.tuplesForRule(t, subrule)...)
-// 		}
-// 		return tuples
-
-// 	} else if rule.InheritIf != "" { // Single rule
-// 		// Rule references other type
-// 		if rule.OfType != "" && rule.WithRelation != "" {
-// 			relations := r.model[rule.OfType]
-// 			relrule := relations[]
-
-// 		}
-
-// 		// TODO: get indirect tuples
-// 	}
-// 	return []Tuple{}
-// }

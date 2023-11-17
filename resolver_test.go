@@ -7,18 +7,18 @@ import (
 )
 
 func TestSortCommands(t *testing.T) {
-	commands := []Command{
+	commands := []CheckCommand{
 		&CheckIndirectCommand{},
 		&CheckDirectUsersetCommand{},
 		&CheckDirectCommand{},
 	}
 	commands = sortCommands(commands)
-	expected := []Command{
+	expected := []CheckCommand{
 		&CheckDirectCommand{},
 		&CheckDirectUsersetCommand{},
 		&CheckIndirectCommand{},
 	}
-	if slices.CompareFunc(commands, expected, func(a Command, b Command) int {
+	if slices.CompareFunc(commands, expected, func(a CheckCommand, b CheckCommand) int {
 		return cmp.Compare(a.Kind(), b.Kind())
 	}) != 0 {
 		t.Fatalf("Expected order %v but got %v", expected, commands)
