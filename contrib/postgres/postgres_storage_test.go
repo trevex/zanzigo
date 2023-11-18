@@ -234,7 +234,7 @@ func TestPostgresQueryBuilding(t *testing.T) {
 	}
 	commands := resolver.CheckCommandsFor("doc", "viewer")
 	query := newPostgresQuery(commands)
-	expectedQueryString := `(SELECT 0 AS command_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='doc' AND object_id=$%d AND (object_relation='editor' OR object_relation='owner' OR object_relation='viewer') AND subject_type=$%d AND subject_id=$%d AND subject_relation=$%d) UNION ALL (SELECT 1 AS command_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='doc' AND object_id=$%d AND (object_relation='editor' OR object_relation='owner' OR object_relation='viewer') AND subject_relation <> '') UNION ALL (SELECT 2 AS command_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='doc' AND object_id=$%d AND (object_relation='parent') AND subject_type='folder')`
+	expectedQueryString := `(SELECT 0 AS command_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='doc' AND object_id=%s AND (object_relation='editor' OR object_relation='owner' OR object_relation='viewer') AND subject_type=%s AND subject_id=%s AND subject_relation=%s) UNION ALL (SELECT 1 AS command_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='doc' AND object_id=%s AND (object_relation='editor' OR object_relation='owner' OR object_relation='viewer') AND subject_relation <> '') UNION ALL (SELECT 2 AS command_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='doc' AND object_id=%s AND (object_relation='parent') AND subject_type='folder')`
 	if query.query != expectedQueryString {
 		t.Fatalf("Expected computed query for commands to be `%s`, but got: %s", expectedQueryString, query.query)
 	}
@@ -286,7 +286,7 @@ func TestPostgresFunctionBuilding(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create postgres function: %v", err)
 	}
-	expectedQueryString := `SELECT * FROM zanzigo_doc_viewer($%d, $%d, $%d, $%d, $%d, $%d)`
+	expectedQueryString := `SELECT * FROM zanzigo_doc_viewer(%s, %s, %s, %s, %s, %s)`
 	if query.query != expectedQueryString {
 		t.Fatalf("Expected computed query for commands to be `%s`, but got: %s", expectedQueryString, query.query)
 	}

@@ -166,13 +166,13 @@ func newPostgresQuery(commands []zanzigo.CheckCommand) *postgresQuery {
 		switch command.Kind() { // NEEDS TO BE IN SYNC WITH `postgresStorage.RunQuery`
 		case zanzigo.KindDirect:
 			// NOTE: we need to be careful with `subject_relation` to handle NULL properly!
-			parts = append(parts, fmt.Sprintf("(SELECT %d AS command_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='%s' AND object_id=$%%d AND %s AND subject_type=$%%d AND subject_id=$%%d AND subject_relation=$%%d)", id, rule.Object, relations))
+			parts = append(parts, fmt.Sprintf("(SELECT %d AS command_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='%s' AND object_id=%%s AND %s AND subject_type=%%s AND subject_id=%%s AND subject_relation=%%s)", id, rule.Object, relations))
 			j += 4
 		case zanzigo.KindDirectUserset:
-			parts = append(parts, fmt.Sprintf("(SELECT %d AS command_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='%s' AND object_id=$%%d AND %s AND subject_relation <> '')", id, rule.Object, relations))
+			parts = append(parts, fmt.Sprintf("(SELECT %d AS command_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='%s' AND object_id=%%s AND %s AND subject_relation <> '')", id, rule.Object, relations))
 			j += 1
 		case zanzigo.KindIndirect:
-			parts = append(parts, fmt.Sprintf("(SELECT %d AS command_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='%s' AND object_id=$%%d AND %s AND subject_type='%s')", id, rule.Object, relations, rule.Subject))
+			parts = append(parts, fmt.Sprintf("(SELECT %d AS command_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='%s' AND object_id=%%s AND %s AND subject_type='%s')", id, rule.Object, relations, rule.Subject))
 			j += 1
 		default:
 			panic("unreachable")
@@ -198,7 +198,7 @@ func (s *postgresStorage) newPostgresFunction(object, relation string, commands 
 		") RETURNS TABLE (command_id INT, object_type TEXT, object_id TEXT, object_relation TEXT, subject_type TEXT, subject_id TEXT, subject_relation TEXT) AS $$\n" + fmt.Sprintf(query.query, argNumbers...) + ";\n$$ LANGUAGE SQL;"
 	_, err := s.pool.Exec(context.Background(), pgfunc)
 	return &postgresQuery{
-		query:   "SELECT * FROM " + pgfuncName + "(" + strings.Join(lo.Map(argNumbers, func(_ any, n int) string { return "$%d" }), ", ") + ")",
+		query:   "SELECT * FROM " + pgfuncName + "(" + strings.Join(lo.Map(argNumbers, func(_ any, n int) string { return "%s" }), ", ") + ")",
 		numArgs: query.numArgs,
 	}, err
 }
@@ -213,7 +213,7 @@ type postgresFunction struct {
 func makeArgsRange(min, max int) []any {
 	a := make([]any, max-min+1)
 	for i := range a {
-		a[i] = min + i
+		a[i] = fmt.Sprintf("$%d", min+i)
 	}
 	return a
 }

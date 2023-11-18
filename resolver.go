@@ -107,9 +107,6 @@ func (r *Resolver) check(ctx context.Context, checks []CheckRequest, depth int) 
 		case KindDirectUserset:
 			pc, ok := r.commandMap[mt.SubjectType][mt.SubjectRelation]
 			if !ok {
-				fmt.Println(cp)
-				fmt.Println(command.Kind())
-				fmt.Println(mt)
 				return false, fmt.Errorf("failed to find %s > %s in query map", mt.SubjectType, mt.SubjectRelation)
 			}
 			nextChecks = append(nextChecks, CheckRequest{
@@ -129,9 +126,6 @@ func (r *Resolver) check(ctx context.Context, checks []CheckRequest, depth int) 
 			for _, relation := range relations {
 				pc, ok := r.commandMap[mt.SubjectType][relation]
 				if !ok {
-					fmt.Println(cp)
-					fmt.Println(mt)
-					fmt.Println(relation)
 					return false, fmt.Errorf("failed to find %s > %s in query map", mt.SubjectType, relation)
 				}
 				nextChecks = append(nextChecks, CheckRequest{
