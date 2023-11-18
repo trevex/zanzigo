@@ -168,7 +168,7 @@ func prepareCommandMapForModel(model *Model, storage Storage) (CommandMap, error
 				}
 			}
 			commands = sortCommands(commands)
-			userdata, err := storage.PrepareForCheckCommands(object, relation, commands)
+			userdata, err := storage.PrepareForChecks(object, relation, commands)
 			if err != nil {
 				return nil, err
 			}

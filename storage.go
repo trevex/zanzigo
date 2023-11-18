@@ -30,7 +30,7 @@ type Storage interface {
 	Write(ctx context.Context, t Tuple) error
 	Read(ctx context.Context, t Tuple) (uuid.UUID, error)
 
-	PrepareForCheckCommands(object, relation string, commands []CheckCommand) (Userdata, error)
+	PrepareForChecks(object, relation string, commands []CheckCommand) (Userdata, error)
 	// Returns MarkedTuples ordered by CommandID!
 	QueryChecks(ctx context.Context, checks []CheckRequest) ([]MarkedTuple, error)
 

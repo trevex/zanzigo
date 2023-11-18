@@ -101,7 +101,7 @@ func (s *postgresStorage) Read(ctx context.Context, t zanzigo.Tuple) (uuid.UUID,
 	return uuid, err
 }
 
-func (s *postgresStorage) PrepareForCheckCommands(object, relation string, commands []zanzigo.CheckCommand) (zanzigo.Userdata, error) {
+func (s *postgresStorage) PrepareForChecks(object, relation string, commands []zanzigo.CheckCommand) (zanzigo.Userdata, error) {
 	if !s.useFunctions {
 		return newPostgresQuery(commands), nil
 	}
