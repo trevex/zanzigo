@@ -109,6 +109,13 @@ func (s *postgresStorage) PrepareForCheckCommands(object, relation string, comma
 }
 
 func (s *postgresStorage) QueryChecks(ctx context.Context, checks []zanzigo.CheckRequest) ([]zanzigo.MarkedTuple, error) {
+	if !s.useFunctions {
+		return s.queryChecks(ctx, checks)
+	}
+	return s.queryChecksFunction(ctx, checks)
+}
+
+func (s *postgresStorage) queryChecks(ctx context.Context, checks []zanzigo.CheckRequest) ([]zanzigo.MarkedTuple, error) {
 	argNum := 1
 	args := make([]any, 0) // TODO: precalculate by adding q.numArgs
 	checkQueries := make([]string, 0, len(checks))
@@ -189,23 +196,103 @@ type postgresQuery struct {
 	numArgs int
 }
 
-func (s *postgresStorage) newPostgresFunction(object, relation string, commands []zanzigo.CheckCommand) (*postgresQuery, error) {
-	query := newPostgresQuery(commands)
-	argNumbers := makeArgsRange(1, query.numArgs)
-	pgfuncName := "zanzigo_" + object + "_" + relation
-	pgfunc := "CREATE OR REPLACE FUNCTION " + pgfuncName + "(" +
-		strings.Join(lo.Map(argNumbers, func(_ any, n int) string { return fmt.Sprintf("arg%d TEXT", n+1) }), ", ") +
-		") RETURNS TABLE (command_id INT, object_type TEXT, object_id TEXT, object_relation TEXT, subject_type TEXT, subject_id TEXT, subject_relation TEXT) AS $$\n" + fmt.Sprintf(query.query, argNumbers...) + ";\n$$ LANGUAGE SQL;"
-	_, err := s.pool.Exec(context.Background(), pgfunc)
-	return &postgresQuery{
-		query:   "SELECT * FROM " + pgfuncName + "(" + strings.Join(lo.Map(argNumbers, func(_ any, n int) string { return "%s" }), ", ") + ")",
-		numArgs: query.numArgs,
+func (s *postgresStorage) queryChecksFunction(ctx context.Context, checks []zanzigo.CheckRequest) ([]zanzigo.MarkedTuple, error) {
+	if len(checks) != 1 {
+		panic("unreachable")
+	}
+	check := checks[0]
+	fn, ok := check.Userdata.(*postgresFunction)
+	if !ok {
+		panic("malformed query data")
+	}
+	result := false
+	err := s.pool.QueryRow(ctx, fn.query, check.Tuple.ObjectID, check.Tuple.SubjectType, check.Tuple.SubjectID, check.Tuple.SubjectRelation).Scan(&result)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	return []zanzigo.MarkedTuple{{CheckID: 0, CommandID: 0, Tuple: check.Tuple}}, nil
+}
+
+func (s *postgresStorage) newPostgresFunction(object, relation string, commands []zanzigo.CheckCommand) (*postgresFunction, error) {
+	funcDecl, query := postgresFunctionFor(object, relation, commands)
+
+	_, err := s.pool.Exec(context.Background(), funcDecl)
+	return &postgresFunction{
+		query: query,
 	}, err
 }
 
 type postgresFunction struct {
-	query   string
-	numArgs int
+	query string
+}
+
+// TODO: respect maxDepth!
+func postgresFunctionFor(object, relation string, commands []zanzigo.CheckCommand) (string, string) {
+	innerSelect := strings.Join(lo.Map(commands, func(command zanzigo.CheckCommand, id int) string {
+		rule := command.Rule()
+		relations := "(" + strings.Join(lo.Map(command.Rule().Relations, func(r string, _ int) string {
+			return "object_relation='" + r + "'"
+		}), " OR ") + ")"
+		switch command.Kind() {
+		case zanzigo.KindDirect:
+			return fmt.Sprintf("(SELECT %d AS command_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='%s' AND object_id=$1 AND %s AND subject_type=$2 AND subject_id=$3 AND subject_relation=$4)", id, rule.Object, relations)
+		case zanzigo.KindDirectUserset:
+			return fmt.Sprintf("(SELECT %d AS command_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='%s' AND object_id=$1 AND %s AND subject_relation <> '')", id, rule.Object, relations)
+		case zanzigo.KindIndirect:
+			return fmt.Sprintf("(SELECT %d AS command_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='%s' AND object_id=$1 AND %s AND subject_type='%s')", id, rule.Object, relations, rule.Subject)
+		default:
+			panic("unreachable")
+		}
+	}), " UNION ALL ") + " ORDER BY command_id"
+	conditions := ""
+	for id, command := range commands {
+		if id == 0 {
+			conditions += "IF "
+		} else {
+			conditions += "ELSIF "
+		}
+		conditions += fmt.Sprintf("mt.command_id = %d THEN\n", id)
+		switch command.Kind() {
+		case zanzigo.KindDirect:
+			conditions += "RETURN TRUE;\n"
+		case zanzigo.KindDirectUserset:
+			conditions += addResultCheck("EXECUTE FORMAT('SELECT zanzigo_%s_%s($1, $2, $3, $4)', mt.subject_type, mt.subject_relation) USING mt.subject_id, $2, $3, $4 INTO result;\n")
+		case zanzigo.KindIndirect:
+			relations := command.Rule().WithRelationToSubject
+			for _, relation := range relations {
+				conditions += addResultCheck(fmt.Sprintf("EXECUTE FORMAT('SELECT zanzigo_%%s_%s($1, $2, $3, $4)', mt.subject_type) USING mt.subject_id, $2, $3, $4 INTO result;\n", relation))
+			}
+		default:
+			panic("unreachable")
+		}
+		if id == len(commands)-1 {
+			conditions += "END IF;"
+		}
+	}
+	funcName := fmt.Sprintf("zanzigo_%s_%s", object, relation)
+	funcDecl := fmt.Sprintf(`CREATE OR REPLACE FUNCTION %s(TEXT, TEXT, TEXT, TEXT) RETURNS BOOLEAN LANGUAGE 'plpgsql' AS $$
+DECLARE
+mt RECORD;
+result BOOLEAN;
+BEGIN
+FOR mt IN
+%s
+LOOP
+%s
+END LOOP;
+RETURN FALSE;
+END;
+$$;`, funcName, innerSelect, conditions)
+
+	return funcDecl, "SELECT " + funcName + "($1, $2, $3, $4)"
+}
+
+func addResultCheck(in string) string {
+	return in + "IF result = TRUE THEN\nRETURN TRUE;\nEND IF;\n"
 }
 
 // Create functions for the set of commands
