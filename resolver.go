@@ -7,69 +7,69 @@ import (
 	"slices"
 )
 
-type CommandKind int
+type Kind int
 
 const (
-	KindUnknown CommandKind = iota
+	KindUnknown Kind = iota
 	KindDirect
 	KindDirectUserset
 	KindIndirect
 )
 
-type CheckCommand interface {
-	Kind() CommandKind
+type Check interface {
+	Kind() Kind
 	Rule() MergedRule
 }
 
-type CheckDirectCommand struct {
+type CheckDirect struct {
 	MergedRule
 }
 
-func (c *CheckDirectCommand) Kind() CommandKind { return KindDirect }
-func (c *CheckDirectCommand) Rule() MergedRule  { return c.MergedRule }
+func (c *CheckDirect) Kind() Kind       { return KindDirect }
+func (c *CheckDirect) Rule() MergedRule { return c.MergedRule }
 
-type CheckDirectUsersetCommand struct {
+type CheckDirectUserset struct {
 	MergedRule
 }
 
-func (c *CheckDirectUsersetCommand) Kind() CommandKind { return KindDirectUserset }
-func (c *CheckDirectUsersetCommand) Rule() MergedRule  { return c.MergedRule }
+func (c *CheckDirectUserset) Kind() Kind       { return KindDirectUserset }
+func (c *CheckDirectUserset) Rule() MergedRule { return c.MergedRule }
 
-// CheckIndirectCommand will first try to find subjects for r.Object r.Relations
+// CheckIndirect will first try to find subjects for r.Object r.Relations
 // and then traverse them independently. (e.g. recursive .Check)
-type CheckIndirectCommand struct {
+type CheckIndirect struct {
 	MergedRule
 }
 
-func (c *CheckIndirectCommand) Kind() CommandKind { return KindIndirect }
-func (c *CheckIndirectCommand) Rule() MergedRule  { return c.MergedRule }
+func (c *CheckIndirect) Kind() Kind       { return KindIndirect }
+func (c *CheckIndirect) Rule() MergedRule { return c.MergedRule }
 
-type PreparedCommands struct {
+type PreparedChecks struct {
 	Userdata Userdata
-	Commands []CheckCommand
+	Checks   []Check
 }
 
-type CommandMap map[string]map[string]PreparedCommands
+type CheckMap map[string]map[string]PreparedChecks
 
 // During creation a set of static commands are precomputed which will also be passed on to the [Storage]-backend via [Storage.PrepareForCheckCommands].
 type Resolver struct {
-	storage    Storage
-	commandMap CommandMap
-	maxDepth   int
+	storage  Storage
+	checkMap CheckMap
+	maxDepth int
 }
 
 // NewResolver creates a new resolver for the particular [Model] using the designated [Storage]-implementation.
 // The main purpose of the [Resolver] is to traverse the ReBAC-policies and check whether a [Tuple] is authorized or not.
 // During creation a set of static commands are precomputed which will also be passed on to the [Storage]-backend via [Storage.PrepareForCheckCommands].
 func NewResolver(model *Model, storage Storage, maxDepth int) (*Resolver, error) {
-	commandMap, err := prepareCommandMapForModel(model, storage)
+	checkMap, err := prepareCheckMapForModel(model, storage)
 	return &Resolver{
-		storage, commandMap, maxDepth,
+		storage, checkMap, maxDepth,
 	}, err
 }
 
 func (r *Resolver) Check(ctx context.Context, t Tuple) (bool, error) {
-	pc, ok := r.commandMap[t.ObjectType][t.ObjectRelation]
+	pc, ok := r.checkMap[t.ObjectType][t.ObjectRelation]
 	if !ok {
 		return false, fmt.Errorf("failed to find %s > %s in query map", t.ObjectType, t.ObjectRelation)
 	}
@@ -77,12 +77,12 @@ func (r *Resolver) Check(ctx context.Context, t Tuple) (bool, error) {
 	return r.check(ctx, []CheckRequest{{
 		Tuple:    t,
 		Userdata: pc.Userdata,
-		Commands: pc.Commands,
+		Checks:   pc.Checks,
 	}}, depth)
 }
 
-func (r *Resolver) check(ctx context.Context, checks []CheckRequest, depth int) (bool, error) {
-	if len(checks) == 0 {
+func (r *Resolver) check(ctx context.Context, crs []CheckRequest, depth int) (bool, error) {
+	if len(crs) == 0 {
 		return false, nil
 	}
 	if depth > r.maxDepth {
@@ -90,7 +90,7 @@ func (r *Resolver) check(ctx context.Context, checks []CheckRequest, depth int) 
 	}
 	depth += 1
 
-	markedTuples, err := r.storage.QueryChecks(ctx, checks)
+	markedTuples, err := r.storage.QueryChecks(ctx, crs)
 	if err != nil {
 		return false, err
 	}
@@ -99,13 +99,13 @@ func (r *Resolver) check(ctx context.Context, checks []CheckRequest, depth int) 
 	// Returned marked tuples are ordered by .CommandID and commands are ordered with directs first,
 	// so we can exit early if we find a direct relationship.
 	for _, mt := range markedTuples {
-		cp := checks[mt.CheckID]
-		command := cp.Commands[mt.CommandID]
-		switch command.Kind() {
+		cp := crs[mt.RequestID]
+		check := cp.Checks[mt.CheckID]
+		switch check.Kind() {
 		case KindDirect:
 			return true, nil
 		case KindDirectUserset:
-			pc, ok := r.commandMap[mt.SubjectType][mt.SubjectRelation]
+			pc, ok := r.checkMap[mt.SubjectType][mt.SubjectRelation]
 			if !ok {
 				return false, fmt.Errorf("failed to find %s > %s in query map", mt.SubjectType, mt.SubjectRelation)
 			}
@@ -119,12 +119,12 @@ func (r *Resolver) check(ctx context.Context, checks []CheckRequest, depth int) 
 					SubjectRelation: cp.Tuple.SubjectRelation,
 				},
 				Userdata: pc.Userdata,
-				Commands: pc.Commands,
+				Checks:   pc.Checks,
 			})
 		case KindIndirect: // TODO: THIS CAN BE USERSET!?
-			relations := command.Rule().WithRelationToSubject
+			relations := check.Rule().WithRelationToSubject
 			for _, relation := range relations {
-				pc, ok := r.commandMap[mt.SubjectType][relation]
+				pc, ok := r.checkMap[mt.SubjectType][relation]
 				if !ok {
 					return false, fmt.Errorf("failed to find %s > %s in query map", mt.SubjectType, relation)
 				}
@@ -138,7 +138,7 @@ func (r *Resolver) check(ctx context.Context, checks []CheckRequest, depth int) 
 						SubjectRelation: cp.Tuple.SubjectRelation,
 					},
 					Userdata: pc.Userdata,
-					Commands: pc.Commands,
+					Checks:   pc.Checks,
 				})
 			}
 		default:
@@ -149,41 +149,41 @@ func (r *Resolver) check(ctx context.Context, checks []CheckRequest, depth int) 
 	return r.check(ctx, nextChecks, depth)
 }
 
-func (r *Resolver) CheckCommandsFor(object, relation string) []CheckCommand {
-	return r.commandMap[object][relation].Commands
+func (r *Resolver) ChecksFor(object, relation string) []Check {
+	return r.checkMap[object][relation].Checks
 }
 
-func prepareCommandMapForModel(model *Model, storage Storage) (CommandMap, error) {
+func prepareCheckMapForModel(model *Model, storage Storage) (CheckMap, error) {
 	// Let's create the commands first
-	commandMap := CommandMap{}
+	checkMap := CheckMap{}
 	for object, relations := range model.MergedRules {
-		commandMap[object] = map[string]PreparedCommands{}
+		checkMap[object] = map[string]PreparedChecks{}
 		for relation, rules := range relations {
-			commands := []CheckCommand{}
+			checks := []Check{}
 			for _, rule := range rules {
 				if len(rule.WithRelationToSubject) > 0 { // INDIRECT
-					commands = append(commands, &CheckIndirectCommand{rule})
+					checks = append(checks, &CheckIndirect{rule})
 				} else { // DIRECT
-					commands = append(commands, &CheckDirectCommand{rule}, &CheckDirectUsersetCommand{rule})
+					checks = append(checks, &CheckDirect{rule}, &CheckDirectUserset{rule})
 				}
 			}
-			commands = sortCommands(commands)
-			userdata, err := storage.PrepareForChecks(object, relation, commands)
+			checks = sortChecks(checks)
+			userdata, err := storage.PrepareForChecks(object, relation, checks)
 			if err != nil {
 				return nil, err
 			}
-			commandMap[object][relation] = PreparedCommands{
+			checkMap[object][relation] = PreparedChecks{
 				Userdata: userdata,
-				Commands: commands,
+				Checks:   checks,
 			}
 		}
 	}
-	return commandMap, nil
+	return checkMap, nil
 }
 
-func sortCommands(commands []CheckCommand) []CheckCommand {
-	slices.SortFunc(commands, func(a, b CheckCommand) int {
+func sortChecks(checks []Check) []Check {
+	slices.SortFunc(checks, func(a, b Check) int {
 		return int(a.Kind()) - int(b.Kind())
 	})
-	return commands
+	return checks
 }
