@@ -96,7 +96,7 @@ type Model struct {
 // NewModel checks the [ObjectMap] for correctness and will infer the rules and
 // prepare them for check-resolution.
 func NewModel(objects ObjectMap) (*Model, error) {
-	// TODO: check objects for correctness
+	// TODO: check objects for correctness!
 	return &Model{
 		InferredRules: inferRules(objects),
 	}, nil

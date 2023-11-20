@@ -7,12 +7,12 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/trevex/zanzigo"
-	"golang.org/x/exp/slices"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/ory/dockertest/v3"
@@ -236,11 +236,11 @@ func TestPostgresQueryBuilding(t *testing.T) {
 	ruleset := resolver.RulesetFor("doc", "viewer")
 	query := newPostgresQuery(ruleset)
 	expectedQueryString := standardizeSpaces(`
-		(SELECT 0 AS rule_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='doc' AND object_id=%s AND (object_relation='editor' OR object_relation='owner' OR object_relation='viewer') AND subject_type=%s AND subject_id=%s AND subject_relation=%s)
+		(SELECT 0 AS rule_index, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='doc' AND object_id=%s AND (object_relation='editor' OR object_relation='owner' OR object_relation='viewer') AND subject_type=%s AND subject_id=%s AND subject_relation=%s)
 		UNION ALL
-		(SELECT 1 AS rule_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='doc' AND object_id=%s AND (object_relation='editor' OR object_relation='owner' OR object_relation='viewer') AND subject_relation <> '')
+		(SELECT 1 AS rule_index, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='doc' AND object_id=%s AND (object_relation='editor' OR object_relation='owner' OR object_relation='viewer') AND subject_relation <> '')
 		UNION ALL
-		(SELECT 2 AS rule_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='doc' AND object_id=%s AND (object_relation='parent') AND subject_type='folder')
+		(SELECT 2 AS rule_index, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='doc' AND object_id=%s AND (object_relation='parent') AND subject_type='folder')
 	`)
 	if query.query != expectedQueryString {
 		t.Fatalf("Expected computed query for checks to be `%s`, but got: %s", expectedQueryString, query.query)
@@ -298,16 +298,16 @@ DECLARE
 	result BOOLEAN;
 BEGIN
 	FOR mt IN
-		(SELECT 0 AS rule_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='doc' AND object_id=$1 AND (object_relation='editor' OR object_relation='owner' OR object_relation='viewer') AND subject_type=$2 AND subject_id=$3 AND subject_relation=$4) UNION ALL (SELECT 1 AS rule_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='doc' AND object_id=$1 AND (object_relation='editor' OR object_relation='owner' OR object_relation='viewer') AND subject_relation <> '') UNION ALL (SELECT 2 AS rule_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='doc' AND object_id=$1 AND (object_relation='parent') AND subject_type='folder') ORDER BY rule_id
+		(SELECT 0 AS rule_index, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='doc' AND object_id=$1 AND (object_relation='editor' OR object_relation='owner' OR object_relation='viewer') AND subject_type=$2 AND subject_id=$3 AND subject_relation=$4) UNION ALL (SELECT 1 AS rule_index, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='doc' AND object_id=$1 AND (object_relation='editor' OR object_relation='owner' OR object_relation='viewer') AND subject_relation <> '') UNION ALL (SELECT 2 AS rule_index, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='doc' AND object_id=$1 AND (object_relation='parent') AND subject_type='folder') ORDER BY rule_index
 	LOOP
-		IF mt.rule_id = 0 THEN
+		IF mt.rule_index = 0 THEN
 			RETURN TRUE;
-		ELSIF mt.rule_id = 1 THEN
+		ELSIF mt.rule_index = 1 THEN
 			EXECUTE FORMAT('SELECT zanzigo_%s_%s($1, $2, $3, $4)', mt.subject_type, mt.subject_relation) USING mt.subject_id, $2, $3, $4 INTO result;
 			IF result = TRUE THEN
 				RETURN TRUE;
 			END IF;
-		ELSIF mt.rule_id = 2 THEN
+		ELSIF mt.rule_index = 2 THEN
 			EXECUTE FORMAT('SELECT zanzigo_%s_editor($1, $2, $3, $4)', mt.subject_type) USING mt.subject_id, $2, $3, $4 INTO result;
 			IF result = TRUE THEN
 				RETURN TRUE;

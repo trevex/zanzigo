@@ -6,9 +6,10 @@ import (
 	"fmt"
 )
 
+// A map of object-types to relations to Userdata.
 type UserdataMap map[string]map[string]Userdata
 
-// During creation a set of static commands are precomputed which will also be passed on to the [Storage]-backend via [Storage.PrepareForCheckCommands].
+// A Resolver uses a [Model] and [Storage]-implementation to execute relationship checks.
 type Resolver struct {
 	storage  Storage
 	userdata UserdataMap
@@ -18,7 +19,10 @@ type Resolver struct {
 
 // NewResolver creates a new resolver for the particular [Model] using the designated [Storage]-implementation.
 // The main purpose of the [Resolver] is to traverse the ReBAC-policies and check whether a [Tuple] is authorized or not.
-// During creation a set of static commands are precomputed which will also be passed on to the [Storage]-backend via [Storage.PrepareForCheckCommands].
+// During creation the inferred rules of the [Model] are used to precompute storage-specific [Userdata] that can be used
+// to speed up checks (when calling Storage.QueryChecks internally).
+//
+// maxDepth limits the depth of the traversal of the authorization-model during checks.
 func NewResolver(model *Model, storage Storage, maxDepth int) (*Resolver, error) {
 	userdata, err := prepareUserdataForRules(storage, model.InferredRules)
 	return &Resolver{
@@ -26,14 +30,15 @@ func NewResolver(model *Model, storage Storage, maxDepth int) (*Resolver, error)
 	}, err
 }
 
+// Checks whether the relationship stated by [Tuple] t is true.
 func (r *Resolver) Check(ctx context.Context, t Tuple) (bool, error) {
 	ruleset, ok := r.rules[t.ObjectType][t.ObjectRelation]
 	if !ok {
 		return false, fmt.Errorf("failed to find %s > %s in query map", t.ObjectType, t.ObjectRelation)
 	}
-	// needs to exist, otherwise .NewResolver would have failed
+	// needs to exist, otherwise `NewResolver` would have failed
 	userdata := r.userdata[t.ObjectType][t.ObjectRelation]
-	depth := 0
+	depth := 0 // We start from zero and dive "upwards"
 	return r.check(ctx, []Check{{
 		Tuple:    t,
 		Ruleset:  ruleset,
@@ -56,11 +61,11 @@ func (r *Resolver) check(ctx context.Context, checks []Check, depth int) (bool, 
 	}
 
 	nextChecks := []Check{}
-	// Returned marked tuples are ordered by .CommandID and commands are ordered with directs first,
-	// so we can exit early if we find a direct relationship.
+	// Returned marked tuples are ordered by .RuleIndex and rules are ordered with directs first,
+	// so we can exit early if we find a direct relationship before continuing to subsequent checks.
 	for _, mt := range markedTuples {
-		check := checks[mt.CheckID]
-		rule := check.Ruleset[mt.RuleID]
+		check := checks[mt.CheckIndex]
+		rule := check.Ruleset[mt.RuleIndex]
 		switch rule.Kind {
 		case KindDirect:
 			return true, nil
@@ -82,7 +87,7 @@ func (r *Resolver) check(ctx context.Context, checks []Check, depth int) (bool, 
 				Ruleset:  ruleset,
 				Userdata: userdata,
 			})
-		case KindIndirect: // TODO: THIS CAN BE USERSET!?
+		case KindIndirect:
 			relations := rule.WithRelationToSubject
 			for _, relation := range relations {
 				ruleset, ok := r.rules[mt.SubjectType][relation]
@@ -111,12 +116,12 @@ func (r *Resolver) check(ctx context.Context, checks []Check, depth int) (bool, 
 	return r.check(ctx, nextChecks, depth)
 }
 
+// Returns an inferred ruleset for the given object-type and relation.
 func (r *Resolver) RulesetFor(object, relation string) []InferredRule {
 	return r.rules[object][relation]
 }
 
 func prepareUserdataForRules(storage Storage, inferredRules InferredRuleMap) (UserdataMap, error) {
-	// Let's create the commands first
 	userdata := UserdataMap{}
 	for object, relations := range inferredRules {
 		userdata[object] = map[string]Userdata{}
