@@ -75,25 +75,36 @@ type InferredRule struct {
 // A map of objects to map of relations to sorted rulesets of [InferredRule]s.
 type InferredRuleMap map[string]map[string][]InferredRule
 
-// Inspired by https://docs.warrant.dev/concepts/object-types/
+// The ObjectMap is the primary input of a model and is required to create a model
+// and compute the inferred rules. The key is expected to be the object-type.
+//
+// The structure is inspired by [warrant].
+//
+// [warrant]: https://docs.warrant.dev/concepts/object-types/
 type ObjectMap map[string]RelationMap
 
+// RelationMap maps relationship-names to rules.
 type RelationMap map[string]Rule
 
+// A Model is the authorization model created from an [ObjectMap].
+// During creation the model-definition provided by an [ObjectMap] is computed
+// into a lower-lever ruleset of [InferredRule]s.
 type Model struct {
-	Objects       ObjectMap
 	InferredRules InferredRuleMap
 }
 
+// NewModel checks the [ObjectMap] for correctness and will infer the rules and
+// prepare them for check-resolution.
 func NewModel(objects ObjectMap) (*Model, error) {
 	// TODO: check objects for correctness
 	return &Model{
-		Objects:       objects,
 		InferredRules: inferRules(objects),
 	}, nil
 }
 
 // Rules are sorted direct first, indirect last.
+// Returns the Rulset for a particular object-type and relation.
+// If the object-type or relation does not exist, nil will be returned.
 func (m *Model) RulesetFor(object, relation string) []InferredRule {
 	relations, ok := m.InferredRules[object]
 	if !ok {
@@ -103,29 +114,35 @@ func (m *Model) RulesetFor(object, relation string) []InferredRule {
 }
 
 func inferRules(objects ObjectMap) InferredRuleMap {
-	mergedRules := InferredRuleMap{}
+	inferredRules := InferredRuleMap{}
+	// For each object and relation:
 	for object, relations := range objects {
-		mergedRules[object] = map[string][]InferredRule{}
+		inferredRules[object] = map[string][]InferredRule{}
 		for relation, rule := range relations {
-			rules := inferRule(objects, object, relation, rule)
-			// Remove duplicates
-			slices.SortFunc(rules, func(a, b InferredRule) int {
+			// Infer the rules
+			ruleset := inferRule(objects, object, relation, rule)
+			// Remove duplicates by first sorting and then compacting
+			slices.SortFunc(ruleset, func(a, b InferredRule) int {
 				return cmp.Compare(fmt.Sprintf("%v", a), fmt.Sprintf("%v", b))
 			})
-			rules = slices.CompactFunc(rules, func(a, b InferredRule) bool {
+			ruleset = slices.CompactFunc(ruleset, func(a, b InferredRule) bool {
 				return a.Object == b.Object && a.Subject == b.Subject &&
 					strings.Join(a.Relations, "|") == strings.Join(b.Relations, "|") &&
 					strings.Join(a.WithRelationToSubject, "|") == strings.Join(b.WithRelationToSubject, "|")
 			})
-			rules = mergeRulesWithRelationToSubject(rules)
-			rules = mergeRulesRelations(rules)
-			rules = expandRuleKinds(rules)
-			rules = sortInferredRulesByKind(rules)
+			// Merge indirect rules into the minimal set required
+			ruleset = mergeRulesWithRelationToSubject(ruleset)
+			// Merge direct rules to minimize the amount of inferRules
+			ruleset = mergeRulesRelations(ruleset)
+			// Properly set the Kind based on the rule
+			ruleset = expandRuleKinds(ruleset)
+			// Sort the rules to make sure direct comes first
+			ruleset = sortInferredRulesByKind(ruleset)
 
-			mergedRules[object][relation] = rules
+			inferredRules[object][relation] = ruleset
 		}
 	}
-	return mergedRules
+	return inferredRules
 }
 
 func inferRule(objects ObjectMap, object, relation string, rule Rule) []InferredRule {
@@ -168,11 +185,12 @@ type replacement struct {
 	rule InferredRule
 }
 
-// NOTE: Requires rules to be sorted and rule.Relations to NOT be merged yet
+// NOTE: Requires rules to be sorted and rule.Relations to NOT be merged yet!
 func mergeRulesWithRelationToSubject(rules []InferredRule) []InferredRule {
 	replacing := false
 	replacements := []replacement{}
 	current := replacement{}
+	// We create a list of replacements to run through slices.Replace
 	for i, rule := range rules {
 		if !replacing && len(rule.WithRelationToSubject) > 0 {
 			replacing = true
@@ -192,18 +210,19 @@ func mergeRulesWithRelationToSubject(rules []InferredRule) []InferredRule {
 	if replacing {
 		replacements = append(replacements, current)
 	}
+	// Replace the rules as specified by replacements
 	for _, r := range replacements {
 		rules = slices.Replace(rules, r.i, r.j, r.rule)
 	}
 	return rules
 }
 
-// NOTE: Requires rules to be sorted
-// TODO: Does it require another deduplication? What about merging relations of WithRelationToSubject?
+// NOTE: Requires rules to be sorted!
 func mergeRulesRelations(rules []InferredRule) []InferredRule {
 	replacing := false
 	replacements := []replacement{}
 	current := replacement{}
+	// We create a list of replacements to run through slices.Replace
 	for i, rule := range rules {
 		if !replacing && len(rule.WithRelationToSubject) == 0 && rule.Subject == "" {
 			replacing = true
@@ -223,12 +242,14 @@ func mergeRulesRelations(rules []InferredRule) []InferredRule {
 	if replacing {
 		replacements = append(replacements, current)
 	}
+	// Replace the rules as specified by replacements
 	for _, r := range replacements {
 		rules = slices.Replace(rules, r.i, r.j, r.rule)
 	}
 	return rules
 }
 
+// Adds Kind to rules based on the shape. Two rules will be create for a "direct-shaped" rule to also check usersets.
 func expandRuleKinds(rules []InferredRule) []InferredRule {
 	expanded := []InferredRule{}
 	for _, rule := range rules {
