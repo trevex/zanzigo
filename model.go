@@ -9,45 +9,70 @@ import (
 )
 
 const (
-	AnyOfPlaceholder = "anyOf"
+	// We need a way to combine rules, we do that by setting 'anyOf' to [Rule.InheritIf].
+	anyOfPlaceholder = "anyOf"
 )
 
 var (
-	ErrTypeUnknown     = errors.New("Unknown type used in tuple")
+	// TODO: doc
+	ErrTypeUnknown = errors.New("Unknown type used in tuple")
+	// TODO: doc
 	ErrRelationUnknown = errors.New("Unknown relation used in tuple")
 )
 
+// A [Rule] is associated with a relationship of an authorization [Model] and defines when the requirement of the relationship is met.
+// Without any fields specified the [Rule] will still be met by direct relations between an object and a subject.
 type Rule struct {
-	InheritIf    string `json:"inheritIf"`
-	OfType       string `json:"ofType,omitempty"`
+	// If [Rule.InheritIf] is set the relation is inheritable from the specified relation,
+	// e.g. `viewer` relationship inherited if subject is `editor`.
+	InheritIf string `json:"inheritIf"`
+	// If [Rule.OfType] is set, the relation specified by [Rule.InheritIf] needs to exist between the subject and the specified object-type.
+	// This requires [Rule.WithRelation] to be set as there needs to be a [Rule.WithRelation] between object and an instance of [Rule.OfType].
+	OfType string `json:"ofType,omitempty"`
+	// WithRelation defines, which relation needs to exist between [Rule.OfType] and the object to inherit the relationship status.
 	WithRelation string `json:"withRelation,omitempty"`
-	Rules        []Rule `json:"rules,omitempty"`
+	// Rules should not be set directly, but are public to make serializing rules easier.
+	// The purpose of [Rule.Rules] is to allow combining rules. This should be done with functions such as [AnyOf] to properly mark the rule.
+	Rules []Rule `json:"rules,omitempty"`
 }
 
+// AnyOf combines multiple rules into one rule, which when applied to a relation will
+// result in a relation when any of the specified rules applies.
 func AnyOf(rules ...Rule) Rule {
 	return Rule{
-		InheritIf: AnyOfPlaceholder,
+		InheritIf: anyOfPlaceholder,
 		Rules:     rules,
 	}
 }
 
+// [InferredRule]s are precomputed for a given [Model] based on the [ObjectMap] and specified [Rule]s.
+// Several types of rules exist, which require different traversals of the authorization model.
 type Kind int
 
 const (
+	// Should never be used, but is used as a default value to make sure [Kind] is always specified.
 	KindUnknown Kind = iota
+	// A direct relationship between object and subject exists, user has direct access to object.
 	KindDirect
+	// A direct relationship between object and usersets exists, e.g. user is part of a group with access to the desired resource.
 	KindDirectUserset
+	// An indirect relationship between object and subject exists through another nested object, e.g. user has access to a folder containing a document.
 	KindIndirect
 )
 
+// An InferredRule is the result of [Rule]s being prepared when a model is instiantiated via [NewModel].
+// It is a flattened and preprocessed form of rules that is directly used to interact with [Storage]-implementations.
+// It merges relations, splits them if multiple [Kind]s apply and it is important to note,
+// that they are also sorted by [InferredRule.Kind] in [Model.InferredRules].
 type InferredRule struct {
 	Kind                  Kind
 	Object                string
-	Subject               string // Order of fields important to ensure proper ordering in mergeRules
+	Subject               string
 	Relations             []string
 	WithRelationToSubject []string
 }
 
+// A map of objects to map of relations to sorted rulesets of [InferredRule]s.
 type InferredRuleMap map[string]map[string][]InferredRule
 
 // Inspired by https://docs.warrant.dev/concepts/object-types/
@@ -105,7 +130,7 @@ func inferRules(objects ObjectMap) InferredRuleMap {
 
 func inferRule(objects ObjectMap, object, relation string, rule Rule) []InferredRule {
 	// Let's unfold the rules if AnyOf
-	if rule.InheritIf == AnyOfPlaceholder {
+	if rule.InheritIf == anyOfPlaceholder {
 		rules := []InferredRule{}
 		for _, subrule := range rule.Rules {
 			rules = append(rules, inferRule(objects, object, relation, subrule)...)
