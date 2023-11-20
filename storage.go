@@ -14,15 +14,15 @@ var (
 // Marker interface for
 type Userdata any
 
-type CheckRequest struct {
+type Check struct {
 	Tuple    Tuple
 	Userdata Userdata
-	Checks   []Check
+	Ruleset  []InferredRule
 }
 
 type MarkedTuple struct {
-	RequestID int
-	CheckID   int
+	CheckID int
+	RuleID  int
 	Tuple
 }
 
@@ -30,9 +30,9 @@ type Storage interface {
 	Write(ctx context.Context, t Tuple) error
 	Read(ctx context.Context, t Tuple) (uuid.UUID, error)
 
-	PrepareForChecks(object, relation string, checks []Check) (Userdata, error)
+	PrepareRuleset(object, relation string, ruleset []InferredRule) (Userdata, error)
 	// Returns MarkedTuples ordered by CommandID!
-	QueryChecks(ctx context.Context, crs []CheckRequest) ([]MarkedTuple, error)
+	QueryChecks(ctx context.Context, check []Check) ([]MarkedTuple, error)
 
 	Close() error
 }

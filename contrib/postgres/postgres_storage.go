@@ -99,21 +99,21 @@ func (s *postgresStorage) Read(ctx context.Context, t zanzigo.Tuple) (uuid.UUID,
 	return uuid, err
 }
 
-func (s *postgresStorage) PrepareForChecks(object, relation string, checks []zanzigo.Check) (zanzigo.Userdata, error) {
+func (s *postgresStorage) PrepareRuleset(object, relation string, ruleset []zanzigo.InferredRule) (zanzigo.Userdata, error) {
 	if !s.useFunctions {
-		return newPostgresQuery(checks), nil
+		return newPostgresQuery(ruleset), nil
 	}
-	return s.newPostgresFunction(object, relation, checks)
+	return s.newPostgresFunction(object, relation, ruleset)
 }
 
-func (s *postgresStorage) QueryChecks(ctx context.Context, crs []zanzigo.CheckRequest) ([]zanzigo.MarkedTuple, error) {
+func (s *postgresStorage) QueryChecks(ctx context.Context, crs []zanzigo.Check) ([]zanzigo.MarkedTuple, error) {
 	if !s.useFunctions {
 		return s.queryChecks(ctx, crs)
 	}
 	return s.queryChecksFunction(ctx, crs)
 }
 
-func (s *postgresStorage) queryChecks(ctx context.Context, crs []zanzigo.CheckRequest) ([]zanzigo.MarkedTuple, error) {
+func (s *postgresStorage) queryChecks(ctx context.Context, crs []zanzigo.Check) ([]zanzigo.MarkedTuple, error) {
 	argNum := 1
 	args := make([]any, 0) // TODO: precalculate by adding q.numArgs
 	queries := make([]string, 0, len(crs))
@@ -122,8 +122,8 @@ func (s *postgresStorage) queryChecks(ctx context.Context, crs []zanzigo.CheckRe
 		if !ok {
 			panic("malformed query data")
 		}
-		for _, check := range cr.Checks {
-			switch check.Kind() { // NEEDS TO BE IN SYNC WITH `NewPostgresCheckQuery`
+		for _, rule := range cr.Ruleset {
+			switch rule.Kind { // NEEDS TO BE IN SYNC WITH `NewPostgresCheckQuery`
 			case zanzigo.KindDirect:
 				args = append(args, cr.Tuple.ObjectID, cr.Tuple.SubjectType, cr.Tuple.SubjectID, cr.Tuple.SubjectRelation)
 			case zanzigo.KindDirectUserset:
@@ -137,11 +137,11 @@ func (s *postgresStorage) queryChecks(ctx context.Context, crs []zanzigo.CheckRe
 		if len(args) != argNum+q.numArgs-1 {
 			return nil, errors.New("args for query do not match expected number of args")
 		}
-		queries = append(queries, fmt.Sprintf("SELECT %d AS request_id", i)+", check_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM ("+fmt.Sprintf(q.query, makeArgsRange(argNum, argNum+q.numArgs-1)...)+fmt.Sprintf(") AS cr%d", i))
+		queries = append(queries, fmt.Sprintf("SELECT %d AS check_id", i)+", rule_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM ("+fmt.Sprintf(q.query, makeArgsRange(argNum, argNum+q.numArgs-1)...)+fmt.Sprintf(") AS cr%d", i))
 		argNum += q.numArgs
 	}
 
-	fullQuery := strings.Join(queries, " UNION ALL ") + " ORDER BY check_id"
+	fullQuery := strings.Join(queries, " UNION ALL ") + " ORDER BY rule_id"
 
 	rows, err := s.pool.Query(ctx, fullQuery, args...)
 	if err != nil {
@@ -150,7 +150,7 @@ func (s *postgresStorage) queryChecks(ctx context.Context, crs []zanzigo.CheckRe
 	tuples := []zanzigo.MarkedTuple{}
 	for rows.Next() {
 		t := zanzigo.MarkedTuple{}
-		err := rows.Scan(&t.RequestID, &t.CheckID, &t.ObjectType, &t.ObjectID, &t.ObjectRelation, &t.SubjectType, &t.SubjectID, &t.SubjectRelation)
+		err := rows.Scan(&t.CheckID, &t.RuleID, &t.ObjectType, &t.ObjectID, &t.ObjectRelation, &t.SubjectType, &t.SubjectID, &t.SubjectRelation)
 		if err != nil {
 			return nil, err
 		}
@@ -160,24 +160,23 @@ func (s *postgresStorage) queryChecks(ctx context.Context, crs []zanzigo.CheckRe
 }
 
 // Will precompute the query for the commands
-func newPostgresQuery(checks []zanzigo.Check) *postgresQuery {
+func newPostgresQuery(ruleset []zanzigo.InferredRule) *postgresQuery {
 	parts := []string{}
 	j := 0
-	for id, check := range checks {
-		rule := check.Rule()
-		relations := "(" + strings.Join(lo.Map(check.Rule().Relations, func(r string, _ int) string {
+	for id, rule := range ruleset {
+		relations := "(" + strings.Join(lo.Map(rule.Relations, func(r string, _ int) string {
 			return "object_relation='" + r + "'"
 		}), " OR ") + ")"
-		switch check.Kind() { // NEEDS TO BE IN SYNC WITH `postgresStorage.RunQuery`
+		switch rule.Kind { // NEEDS TO BE IN SYNC WITH `postgresStorage.RunQuery`
 		case zanzigo.KindDirect:
 			// NOTE: we need to be careful with `subject_relation` to handle NULL properly!
-			parts = append(parts, fmt.Sprintf("(SELECT %d AS check_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='%s' AND object_id=%%s AND %s AND subject_type=%%s AND subject_id=%%s AND subject_relation=%%s)", id, rule.Object, relations))
+			parts = append(parts, fmt.Sprintf("(SELECT %d AS rule_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='%s' AND object_id=%%s AND %s AND subject_type=%%s AND subject_id=%%s AND subject_relation=%%s)", id, rule.Object, relations))
 			j += 4
 		case zanzigo.KindDirectUserset:
-			parts = append(parts, fmt.Sprintf("(SELECT %d AS check_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='%s' AND object_id=%%s AND %s AND subject_relation <> '')", id, rule.Object, relations))
+			parts = append(parts, fmt.Sprintf("(SELECT %d AS rule_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='%s' AND object_id=%%s AND %s AND subject_relation <> '')", id, rule.Object, relations))
 			j += 1
 		case zanzigo.KindIndirect:
-			parts = append(parts, fmt.Sprintf("(SELECT %d AS check_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='%s' AND object_id=%%s AND %s AND subject_type='%s')", id, rule.Object, relations, rule.Subject))
+			parts = append(parts, fmt.Sprintf("(SELECT %d AS rule_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='%s' AND object_id=%%s AND %s AND subject_type='%s')", id, rule.Object, relations, rule.Subject))
 			j += 1
 		default:
 			panic("unreachable")
@@ -194,7 +193,7 @@ type postgresQuery struct {
 	numArgs int
 }
 
-func (s *postgresStorage) queryChecksFunction(ctx context.Context, checks []zanzigo.CheckRequest) ([]zanzigo.MarkedTuple, error) {
+func (s *postgresStorage) queryChecksFunction(ctx context.Context, checks []zanzigo.Check) ([]zanzigo.MarkedTuple, error) {
 	if len(checks) != 1 {
 		panic("unreachable")
 	}
@@ -212,11 +211,11 @@ func (s *postgresStorage) queryChecksFunction(ctx context.Context, checks []zanz
 		return nil, err
 	}
 
-	return []zanzigo.MarkedTuple{{RequestID: 0, CheckID: 0, Tuple: check.Tuple}}, nil
+	return []zanzigo.MarkedTuple{{CheckID: 0, RuleID: 0, Tuple: check.Tuple}}, nil
 }
 
-func (s *postgresStorage) newPostgresFunction(object, relation string, checks []zanzigo.Check) (*postgresFunction, error) {
-	funcDecl, query := postgresFunctionFor(object, relation, checks)
+func (s *postgresStorage) newPostgresFunction(object, relation string, ruleset []zanzigo.InferredRule) (*postgresFunction, error) {
+	funcDecl, query := postgresFunctionFor(object, relation, ruleset)
 
 	_, err := s.pool.Exec(context.Background(), funcDecl)
 	return &postgresFunction{
@@ -229,45 +228,44 @@ type postgresFunction struct {
 }
 
 // TODO: respect maxDepth!
-func postgresFunctionFor(object, relation string, checks []zanzigo.Check) (string, string) {
-	innerSelect := strings.Join(lo.Map(checks, func(check zanzigo.Check, id int) string {
-		rule := check.Rule()
-		relations := "(" + strings.Join(lo.Map(check.Rule().Relations, func(r string, _ int) string {
+func postgresFunctionFor(object, relation string, ruleset []zanzigo.InferredRule) (string, string) {
+	innerSelect := strings.Join(lo.Map(ruleset, func(rule zanzigo.InferredRule, id int) string {
+		relations := "(" + strings.Join(lo.Map(rule.Relations, func(r string, _ int) string {
 			return "object_relation='" + r + "'"
 		}), " OR ") + ")"
-		switch check.Kind() {
+		switch rule.Kind {
 		case zanzigo.KindDirect:
-			return fmt.Sprintf("(SELECT %d AS check_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='%s' AND object_id=$1 AND %s AND subject_type=$2 AND subject_id=$3 AND subject_relation=$4)", id, rule.Object, relations)
+			return fmt.Sprintf("(SELECT %d AS rule_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='%s' AND object_id=$1 AND %s AND subject_type=$2 AND subject_id=$3 AND subject_relation=$4)", id, rule.Object, relations)
 		case zanzigo.KindDirectUserset:
-			return fmt.Sprintf("(SELECT %d AS check_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='%s' AND object_id=$1 AND %s AND subject_relation <> '')", id, rule.Object, relations)
+			return fmt.Sprintf("(SELECT %d AS rule_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='%s' AND object_id=$1 AND %s AND subject_relation <> '')", id, rule.Object, relations)
 		case zanzigo.KindIndirect:
-			return fmt.Sprintf("(SELECT %d AS check_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='%s' AND object_id=$1 AND %s AND subject_type='%s')", id, rule.Object, relations, rule.Subject)
+			return fmt.Sprintf("(SELECT %d AS rule_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='%s' AND object_id=$1 AND %s AND subject_type='%s')", id, rule.Object, relations, rule.Subject)
 		default:
 			panic("unreachable")
 		}
-	}), " UNION ALL ") + " ORDER BY check_id"
+	}), " UNION ALL ") + " ORDER BY rule_id"
 	conditions := ""
-	for id, check := range checks {
+	for id, rule := range ruleset {
 		if id == 0 {
 			conditions += "IF "
 		} else {
 			conditions += "ELSIF "
 		}
-		conditions += fmt.Sprintf("mt.check_id = %d THEN\n", id)
-		switch check.Kind() {
+		conditions += fmt.Sprintf("mt.rule_id = %d THEN\n", id)
+		switch rule.Kind {
 		case zanzigo.KindDirect:
 			conditions += "RETURN TRUE;\n"
 		case zanzigo.KindDirectUserset:
 			conditions += addResultCheck("EXECUTE FORMAT('SELECT zanzigo_%s_%s($1, $2, $3, $4)', mt.subject_type, mt.subject_relation) USING mt.subject_id, $2, $3, $4 INTO result;\n")
 		case zanzigo.KindIndirect:
-			relations := check.Rule().WithRelationToSubject
+			relations := rule.WithRelationToSubject
 			for _, relation := range relations {
 				conditions += addResultCheck(fmt.Sprintf("EXECUTE FORMAT('SELECT zanzigo_%%s_%s($1, $2, $3, $4)', mt.subject_type) USING mt.subject_id, $2, $3, $4 INTO result;\n", relation))
 			}
 		default:
 			panic("unreachable")
 		}
-		if id == len(checks)-1 {
+		if id == len(ruleset)-1 {
 			conditions += "END IF;"
 		}
 	}

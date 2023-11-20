@@ -233,21 +233,21 @@ func TestPostgresQueryBuilding(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolver creation failed: %v", err)
 	}
-	checks := resolver.ChecksFor("doc", "viewer")
-	query := newPostgresQuery(checks)
+	ruleset := resolver.RulesetFor("doc", "viewer")
+	query := newPostgresQuery(ruleset)
 	expectedQueryString := standardizeSpaces(`
-		(SELECT 0 AS check_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='doc' AND object_id=%s AND (object_relation='editor' OR object_relation='owner' OR object_relation='viewer') AND subject_type=%s AND subject_id=%s AND subject_relation=%s)
+		(SELECT 0 AS rule_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='doc' AND object_id=%s AND (object_relation='editor' OR object_relation='owner' OR object_relation='viewer') AND subject_type=%s AND subject_id=%s AND subject_relation=%s)
 		UNION ALL
-		(SELECT 1 AS check_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='doc' AND object_id=%s AND (object_relation='editor' OR object_relation='owner' OR object_relation='viewer') AND subject_relation <> '')
+		(SELECT 1 AS rule_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='doc' AND object_id=%s AND (object_relation='editor' OR object_relation='owner' OR object_relation='viewer') AND subject_relation <> '')
 		UNION ALL
-		(SELECT 2 AS check_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='doc' AND object_id=%s AND (object_relation='parent') AND subject_type='folder')
+		(SELECT 2 AS rule_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='doc' AND object_id=%s AND (object_relation='parent') AND subject_type='folder')
 	`)
 	if query.query != expectedQueryString {
 		t.Fatalf("Expected computed query for checks to be `%s`, but got: %s", expectedQueryString, query.query)
 	}
 
 	ctx := context.Background()
-	tuples, err := storage.QueryChecks(ctx, []zanzigo.CheckRequest{{
+	tuples, err := storage.QueryChecks(ctx, []zanzigo.Check{{
 		Tuple: zanzigo.Tuple{
 			ObjectType:     "doc",
 			ObjectID:       "mydoc",
@@ -256,7 +256,7 @@ func TestPostgresQueryBuilding(t *testing.T) {
 			SubjectID:      "myuser",
 		},
 		Userdata: query,
-		Checks:   checks,
+		Ruleset:  ruleset,
 	}})
 	if err != nil {
 		t.Fatalf("Expected query to not err: %v", err)
@@ -286,9 +286,9 @@ func TestPostgresFunctionBuilding(t *testing.T) {
 		t.Fatalf("Resolver creation failed: %v", err)
 	}
 
-	commands := resolver.ChecksFor("doc", "viewer")
+	ruleset := resolver.RulesetFor("doc", "viewer")
 
-	decl, query := postgresFunctionFor("doc", "viewer", commands)
+	decl, query := postgresFunctionFor("doc", "viewer", ruleset)
 	expectedQuery := `SELECT zanzigo_doc_viewer($1, $2, $3, $4)`
 	decl = standardizeSpaces(decl)
 	expectedDecl := standardizeSpaces(`
@@ -298,16 +298,16 @@ DECLARE
 	result BOOLEAN;
 BEGIN
 	FOR mt IN
-		(SELECT 0 AS check_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='doc' AND object_id=$1 AND (object_relation='editor' OR object_relation='owner' OR object_relation='viewer') AND subject_type=$2 AND subject_id=$3 AND subject_relation=$4) UNION ALL (SELECT 1 AS check_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='doc' AND object_id=$1 AND (object_relation='editor' OR object_relation='owner' OR object_relation='viewer') AND subject_relation <> '') UNION ALL (SELECT 2 AS check_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='doc' AND object_id=$1 AND (object_relation='parent') AND subject_type='folder') ORDER BY check_id
+		(SELECT 0 AS rule_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='doc' AND object_id=$1 AND (object_relation='editor' OR object_relation='owner' OR object_relation='viewer') AND subject_type=$2 AND subject_id=$3 AND subject_relation=$4) UNION ALL (SELECT 1 AS rule_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='doc' AND object_id=$1 AND (object_relation='editor' OR object_relation='owner' OR object_relation='viewer') AND subject_relation <> '') UNION ALL (SELECT 2 AS rule_id, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='doc' AND object_id=$1 AND (object_relation='parent') AND subject_type='folder') ORDER BY rule_id
 	LOOP
-		IF mt.check_id = 0 THEN
+		IF mt.rule_id = 0 THEN
 			RETURN TRUE;
-		ELSIF mt.check_id = 1 THEN
+		ELSIF mt.rule_id = 1 THEN
 			EXECUTE FORMAT('SELECT zanzigo_%s_%s($1, $2, $3, $4)', mt.subject_type, mt.subject_relation) USING mt.subject_id, $2, $3, $4 INTO result;
 			IF result = TRUE THEN
 				RETURN TRUE;
 			END IF;
-		ELSIF mt.check_id = 2 THEN
+		ELSIF mt.rule_id = 2 THEN
 			EXECUTE FORMAT('SELECT zanzigo_%s_editor($1, $2, $3, $4)', mt.subject_type) USING mt.subject_id, $2, $3, $4 INTO result;
 			IF result = TRUE THEN
 				RETURN TRUE;
@@ -333,7 +333,7 @@ $$;`)
 	}
 
 	pgStorage := storageFn.(*postgresStorage)
-	_, err = pgStorage.newPostgresFunction("doc", "viewer", commands)
+	_, err = pgStorage.newPostgresFunction("doc", "viewer", ruleset)
 	if err != nil {
 		t.Fatalf("Expected function to be created, but failed with: %v", err)
 	}

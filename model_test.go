@@ -54,14 +54,15 @@ func TestModel(t *testing.T) {
 		t.Fatalf("Model creation failed: %v", err)
 	}
 
-	rules := model.RulesFor("doc", "viewer")
-	expected := []zanzigo.MergedRule{
-		{Object: "doc", Relations: []string{"editor", "owner", "viewer"}},
-		{Object: "doc", Relations: []string{"parent"}, Subject: "folder", WithRelationToSubject: []string{"editor", "owner", "viewer"}},
+	ruleset := model.RulesetFor("doc", "viewer")
+	expected := []zanzigo.InferredRule{
+		{Kind: zanzigo.KindDirect, Object: "doc", Relations: []string{"editor", "owner", "viewer"}},
+		{Kind: zanzigo.KindDirectUserset, Object: "doc", Relations: []string{"editor", "owner", "viewer"}},
+		{Kind: zanzigo.KindIndirect, Object: "doc", Relations: []string{"parent"}, Subject: "folder", WithRelationToSubject: []string{"editor", "owner", "viewer"}},
 	}
-	if slices.CompareFunc(rules, expected, func(a, b zanzigo.MergedRule) int {
+	if slices.CompareFunc(ruleset, expected, func(a, b zanzigo.InferredRule) int {
 		return cmp.Compare(fmt.Sprintf("%v", a), fmt.Sprintf("%v", b))
 	}) != 0 {
-		t.Fatalf("Expected rules %v, but got %v instead", expected, rules)
+		t.Fatalf("Expected ruleset %v, but got %v instead", expected, ruleset)
 	}
 }
