@@ -46,7 +46,7 @@
 // With a storage-implementation available, tuples can be inserted (check [whitepaper] for notation or altenatively construct [Tuple] directly):
 //
 //	// We add user 'myuser' to the group 'mygroup'
-//	 = storage.Write(ctx, zanzigo.TupleString("group:mygroup#member@user:myuser"))
+//	_ = storage.Write(ctx, zanzigo.TupleString("group:mygroup#member@user:myuser"))
 //	// The document 'mydoc' is in folder 'myfolder'
 //	_ = storage.Write(ctx, zanzigo.TupleString("doc:mydoc#parent@folder:myfolder"))
 //	// Members of group 'mygroup' are viewers of folder 'myfolder'
@@ -54,7 +54,7 @@
 //
 // Using a [Resolver] permissions can be checked by traversing the tuples using the inferred rules of the authorization-model:
 //
-//	resolver, _ := zanzigo.NewSResolver(model, storage, 16)
+//	resolver, _ := zanzigo.NewResolver(model, storage, 16)
 //	// Based on the indirect permission through the group's permissions on the folder,
 //	// the following would return 'true':
 //	result, _ := resolver.Check(context.Background(), zanzigo.TupleString("doc:mydoc#viewer@user:myuser"))
