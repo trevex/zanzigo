@@ -184,7 +184,7 @@ func TestPostgresWithResolver(t *testing.T) {
 	model := DefaultModel(t)
 
 	runChecks := func(t testing.TB, s zanzigo.Storage) {
-		resolver, err := zanzigo.NewResolver(model, storage, 16)
+		resolver, err := zanzigo.NewSequentialResolver(model, storage, 16)
 		if err != nil {
 			t.Fatalf("Expected Resolver creation to not error on: %v", err)
 		}
@@ -197,7 +197,7 @@ func TestPostgresWithResolver(t *testing.T) {
 			SubjectID:      "myuser",
 		})
 		if !result || err != nil {
-			t.Fatalf("Expected resolver.Check to return true, nil, but got %v, %v instead", result, err)
+			t.Fatalf("Expected resolver.Check to return true, <nil>, but got %v, %v instead", result, err)
 		}
 
 		result, err = resolver.Check(context.Background(), zanzigo.Tuple{
@@ -208,7 +208,7 @@ func TestPostgresWithResolver(t *testing.T) {
 			SubjectID:      "myuser",
 		})
 		if result || err != nil {
-			t.Fatalf("Expected resolver.Check to return true, nil, but got %v, %v instead", result, err)
+			t.Fatalf("Expected resolver.Check to return false, <nil>, but got %v, %v instead", result, err)
 		}
 	}
 
@@ -229,7 +229,7 @@ func TestPostgresWithResolver(t *testing.T) {
 func TestPostgresQueryBuilding(t *testing.T) {
 	model := DefaultModel(t)
 
-	resolver, err := zanzigo.NewResolver(model, storage, 16)
+	resolver, err := zanzigo.NewSequentialResolver(model, storage, 16)
 	if err != nil {
 		t.Fatalf("Resolver creation failed: %v", err)
 	}
@@ -281,7 +281,7 @@ func TestPostgresFunctionBuilding(t *testing.T) {
 	}
 	defer storageFn.Close()
 
-	resolver, err := zanzigo.NewResolver(model, storageFn, 16)
+	resolver, err := zanzigo.NewSequentialResolver(model, storageFn, 16)
 	if err != nil {
 		t.Fatalf("Resolver creation failed: %v", err)
 	}
@@ -342,7 +342,7 @@ $$;`)
 
 func BenchmarkResolverWithPostgres(b *testing.B) {
 	model := DefaultModel(b)
-	resolver, err := zanzigo.NewResolver(model, storage, 16)
+	resolver, err := zanzigo.NewSequentialResolver(model, storage, 16)
 	if err != nil {
 		b.Fatalf("Resolver creation failed: %v", err)
 	}
@@ -381,7 +381,7 @@ func BenchmarkResolverWithPostgres(b *testing.B) {
 		b.Fatalf("PostgresStorage creation failed: %v", err)
 	}
 	defer storageFn.Close()
-	resolverFn, err := zanzigo.NewResolver(model, storageFn, 16)
+	resolverFn, err := zanzigo.NewSequentialResolver(model, storageFn, 16)
 	if err != nil {
 		b.Fatalf("Resolver creation failed: %v", err)
 	}
