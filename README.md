@@ -1,3 +1,5 @@
+[![Go Reference](https://pkg.go.dev/badge/github.com/trevex/zanzigo.svg)](https://pkg.go.dev/github.com/trevex/zanzigo)
+
 # `zanzigo`
 
 The `zanzigo`-library provides building blocks for creating your own [Zanzibar](https://research.google/pubs/pub48190/)-esque authorization service.
