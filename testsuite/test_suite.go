@@ -137,7 +137,7 @@ type Expectations struct {
 }
 
 func RunTest(t *testing.T, storage zanzigo.Storage, expectations Expectations) {
-	resolver, err := zanzigo.NewSequentialResolver(Model, storage, 16)
+	resolver, err := zanzigo.NewResolver(Model, storage, 16)
 	require.NoError(t, err)
 
 	t.Run("checks", func(t *testing.T) {
@@ -200,7 +200,7 @@ func RunBenchmarkAll(b *testing.B, storages map[string]zanzigo.Storage) {
 }
 
 func RunBenchmark(b *testing.B, storage zanzigo.Storage) {
-	resolver, err := zanzigo.NewSequentialResolver(Model, storage, 16)
+	resolver, err := zanzigo.NewResolver(Model, storage, 16)
 	require.NoError(b, err)
 
 	// TODO: generate junk data?

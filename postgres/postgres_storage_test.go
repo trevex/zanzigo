@@ -132,19 +132,19 @@ func TestPostgresWithTestSuite(t *testing.T) {
 }
 
 func TestPostgresQueryBuilding(t *testing.T) {
-	resolver, err := zanzigo.NewSequentialResolver(testsuite.Model, storage, 16)
+	resolver, err := zanzigo.NewResolver(testsuite.Model, storage, 16)
 	require.NoError(t, err)
 
 	ruleset := resolver.RulesetFor("doc", "viewer")
-	query := newPostgresQuery(ruleset)
+	query := queryWithPlaceholdersFor(ruleset)
 	expectedQuery := standardizeSpaces(`
-		(SELECT 0 AS rule_index, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='doc' AND object_id=%s AND (object_relation='editor' OR object_relation='owner' OR object_relation='viewer') AND subject_type=%s AND subject_id=%s AND subject_relation=%s)
+		(SELECT 0 AS rule_index, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='doc' AND object_id=$%d AND (object_relation='editor' OR object_relation='owner' OR object_relation='viewer') AND subject_type=$%d AND subject_id=$%d AND subject_relation=$%d)
 		UNION ALL
-		(SELECT 1 AS rule_index, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='doc' AND object_id=%s AND (object_relation='editor' OR object_relation='owner' OR object_relation='viewer') AND subject_relation <> '')
+		(SELECT 1 AS rule_index, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='doc' AND object_id=$%d AND (object_relation='editor' OR object_relation='owner' OR object_relation='viewer') AND subject_relation <> '')
 		UNION ALL
-		(SELECT 2 AS rule_index, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='doc' AND object_id=%s AND (object_relation='parent') AND subject_type='folder')
+		(SELECT 2 AS rule_index, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='doc' AND object_id=$%d AND (object_relation='parent') AND subject_type='folder')
 	`)
-	require.Equal(t, expectedQuery, query.query)
+	require.Equal(t, expectedQuery, query)
 }
 
 func TestPostgresFunctionBuilding(t *testing.T) {
@@ -152,12 +152,12 @@ func TestPostgresFunctionBuilding(t *testing.T) {
 	require.NoError(t, err)
 	defer storageFunctions.Close()
 
-	resolver, err := zanzigo.NewSequentialResolver(testsuite.Model, storageFunctions, 16)
+	resolver, err := zanzigo.NewResolver(testsuite.Model, storageFunctions, 16)
 	require.NoError(t, err)
 
 	ruleset := resolver.RulesetFor("doc", "viewer")
 
-	decl, query := postgresFunctionFor("doc", "viewer", ruleset)
+	decl, query := functionAndQueryFor("doc", "viewer", ruleset)
 	expectedQuery := `SELECT zanzigo_doc_viewer($1, $2, $3, $4)`
 	decl = standardizeSpaces(decl)
 	expectedDecl := standardizeSpaces(`
@@ -201,7 +201,7 @@ $$;`)
 	require.Equal(t, expectedDecl, decl)
 	require.Equal(t, expectedQuery, query)
 
-	_, err = storageFunctions.newPostgresFunction("doc", "viewer", ruleset)
+	_, err = storageFunctions.createOrReplaceFunctionFor("doc", "viewer", ruleset)
 	if err != nil {
 		t.Fatalf("Expected function to be created, but failed with: %v", err)
 	}
