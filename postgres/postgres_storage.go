@@ -27,12 +27,12 @@ func RunMigrations(databaseURL string) error {
 	if err != nil {
 		return err
 	}
-	migrate, err := migrate.NewWithSourceInstance("iofs", driver, databaseURL)
+	migrations, err := migrate.NewWithSourceInstance("iofs", driver, databaseURL)
 	if err != nil {
 		return err
 	}
-	err = migrate.Up()
-	if err != nil {
+	err = migrations.Up()
+	if err != nil && err != migrate.ErrNoChange {
 		return err
 	}
 	return nil
@@ -204,11 +204,11 @@ func (s *postgresStorage) queryChecksFunction(ctx context.Context, checks []zanz
 	}
 	result := false
 	err := s.pool.QueryRow(ctx, fn.query, check.Tuple.ObjectID, check.Tuple.SubjectType, check.Tuple.SubjectID, check.Tuple.SubjectRelation).Scan(&result)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil
-	}
 	if err != nil {
 		return nil, err
+	}
+	if !result {
+		return nil, nil
 	}
 
 	return []zanzigo.MarkedTuple{{CheckIndex: 0, RuleIndex: 0, Tuple: check.Tuple}}, nil
@@ -260,7 +260,7 @@ func postgresFunctionFor(object, relation string, ruleset []zanzigo.InferredRule
 		case zanzigo.KindIndirect:
 			relations := rule.WithRelationToSubject
 			for _, relation := range relations {
-				conditions += addResultCheck(fmt.Sprintf("EXECUTE FORMAT('SELECT zanzigo_%%s_%s($1, $2, $3, $4)', mt.subject_type) USING mt.subject_id, $2, $3, $4 INTO result;\n", relation))
+				conditions += addResultCheck(fmt.Sprintf("SELECT zanzigo_%s_%s(mt.subject_id, $2, $3, $4) INTO result;\n", rule.Subject, relation))
 			}
 		default:
 			panic("unreachable")
