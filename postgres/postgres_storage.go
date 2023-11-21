@@ -56,12 +56,12 @@ func UseFunctions() PostgresOption {
 	return postgresFunctionAdapter(func(c *postgresConfig) { c.useFunctions = true })
 }
 
-type postgresStorage struct {
+type PostgresStorage struct {
 	pool         *pgxpool.Pool
 	useFunctions bool
 }
 
-func NewPostgresStorage(databaseURL string, options ...PostgresOption) (zanzigo.Storage, error) {
+func NewPostgresStorage(databaseURL string, options ...PostgresOption) (*PostgresStorage, error) {
 	opts := postgresConfig{}
 	lo.ForEach(options, func(o PostgresOption, _ int) { o.do(&opts) })
 	config, err := pgxpool.ParseConfig(databaseURL)
@@ -76,20 +76,20 @@ func NewPostgresStorage(databaseURL string, options ...PostgresOption) (zanzigo.
 	if err != nil {
 		return nil, err
 	}
-	return &postgresStorage{pool, opts.useFunctions}, nil
+	return &PostgresStorage{pool, opts.useFunctions}, nil
 }
 
-func (s *postgresStorage) Close() error {
+func (s *PostgresStorage) Close() error {
 	s.pool.Close()
 	return nil
 }
 
-func (s *postgresStorage) Write(ctx context.Context, t zanzigo.Tuple) error {
+func (s *PostgresStorage) Write(ctx context.Context, t zanzigo.Tuple) error {
 	_, err := s.pool.Exec(ctx, "INSERT INTO tuples (object_type, object_id, object_relation, subject_type, subject_id, subject_relation) values($1, $2, $3, $4, $5, $6)", t.ObjectType, t.ObjectID, t.ObjectRelation, t.SubjectType, t.SubjectID, t.SubjectRelation)
 	return err
 }
 
-func (s *postgresStorage) Read(ctx context.Context, t zanzigo.Tuple) (uuid.UUID, error) {
+func (s *PostgresStorage) Read(ctx context.Context, t zanzigo.Tuple) (uuid.UUID, error) {
 	uuid := uuid.UUID{}
 	err := s.pool.QueryRow(ctx, "SELECT uuid FROM tuples WHERE object_type=$1 AND object_id=$2 AND object_relation=$3 AND subject_type=$4 AND subject_id=$5 AND subject_relation=$6", t.ObjectType, t.ObjectID, t.ObjectRelation, t.SubjectType, t.SubjectID, t.SubjectRelation).
 		Scan(&uuid)
@@ -99,21 +99,21 @@ func (s *postgresStorage) Read(ctx context.Context, t zanzigo.Tuple) (uuid.UUID,
 	return uuid, err
 }
 
-func (s *postgresStorage) PrepareRuleset(object, relation string, ruleset []zanzigo.InferredRule) (zanzigo.Userdata, error) {
+func (s *PostgresStorage) PrepareRuleset(object, relation string, ruleset []zanzigo.InferredRule) (zanzigo.Userdata, error) {
 	if !s.useFunctions {
 		return newPostgresQuery(ruleset), nil
 	}
 	return s.newPostgresFunction(object, relation, ruleset)
 }
 
-func (s *postgresStorage) QueryChecks(ctx context.Context, crs []zanzigo.Check) ([]zanzigo.MarkedTuple, error) {
+func (s *PostgresStorage) QueryChecks(ctx context.Context, crs []zanzigo.Check) ([]zanzigo.MarkedTuple, error) {
 	if !s.useFunctions {
 		return s.queryChecks(ctx, crs)
 	}
 	return s.queryChecksFunction(ctx, crs)
 }
 
-func (s *postgresStorage) queryChecks(ctx context.Context, crs []zanzigo.Check) ([]zanzigo.MarkedTuple, error) {
+func (s *PostgresStorage) queryChecks(ctx context.Context, crs []zanzigo.Check) ([]zanzigo.MarkedTuple, error) {
 	argNum := 1
 	args := make([]any, 0) // TODO: precalculate by adding q.numArgs
 	queries := make([]string, 0, len(crs))
@@ -193,7 +193,7 @@ type postgresQuery struct {
 	numArgs int
 }
 
-func (s *postgresStorage) queryChecksFunction(ctx context.Context, checks []zanzigo.Check) ([]zanzigo.MarkedTuple, error) {
+func (s *PostgresStorage) queryChecksFunction(ctx context.Context, checks []zanzigo.Check) ([]zanzigo.MarkedTuple, error) {
 	if len(checks) != 1 {
 		panic("unreachable")
 	}
@@ -214,7 +214,7 @@ func (s *postgresStorage) queryChecksFunction(ctx context.Context, checks []zanz
 	return []zanzigo.MarkedTuple{{CheckIndex: 0, RuleIndex: 0, Tuple: check.Tuple}}, nil
 }
 
-func (s *postgresStorage) newPostgresFunction(object, relation string, ruleset []zanzigo.InferredRule) (*postgresFunction, error) {
+func (s *PostgresStorage) newPostgresFunction(object, relation string, ruleset []zanzigo.InferredRule) (*postgresFunction, error) {
 	funcDecl, query := postgresFunctionFor(object, relation, ruleset)
 
 	_, err := s.pool.Exec(context.Background(), funcDecl)

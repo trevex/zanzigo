@@ -6,6 +6,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	"github.com/trevex/zanzigo"
 )
 
@@ -49,10 +50,7 @@ func TestModel(t *testing.T) {
 			),
 		},
 	})
-
-	if err != nil {
-		t.Fatalf("Model creation failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	ruleset := model.RulesetFor("doc", "viewer")
 	expected := []zanzigo.InferredRule{
@@ -60,6 +58,7 @@ func TestModel(t *testing.T) {
 		{Kind: zanzigo.KindDirectUserset, Object: "doc", Relations: []string{"editor", "owner", "viewer"}},
 		{Kind: zanzigo.KindIndirect, Object: "doc", Relations: []string{"parent"}, Subject: "folder", WithRelationToSubject: []string{"editor", "owner", "viewer"}},
 	}
+
 	if slices.CompareFunc(ruleset, expected, func(a, b zanzigo.InferredRule) int {
 		return cmp.Compare(fmt.Sprintf("%v", a), fmt.Sprintf("%v", b))
 	}) != 0 {

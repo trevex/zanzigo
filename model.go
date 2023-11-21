@@ -23,16 +23,16 @@ var (
 // A [Rule] is associated with a relationship of an authorization [Model] and defines when the requirement of the relationship is met.
 // Without any fields specified the [Rule] will still be met by direct relations between an object and a subject.
 type Rule struct {
-	// If [Rule.InheritIf] is set the relation is inheritable from the specified relation,
+	// If InheritIf is set the relation is inheritable from the specified relation,
 	// e.g. `viewer` relationship inherited if subject is `editor`.
 	InheritIf string `json:"inheritIf"`
-	// If [Rule.OfType] is set, the relation specified by [Rule.InheritIf] needs to exist between the subject and the specified object-type.
-	// This requires [Rule.WithRelation] to be set as there needs to be a [Rule.WithRelation] between object and an instance of [Rule.OfType].
+	// If OfType is set, the relation specified by InheritIf needs to exist between the subject and the specified object-type.
+	// This requires WithRelation to be set as there needs to be a WithRelation between object and an instance of OfType.
 	OfType string `json:"ofType,omitempty"`
-	// WithRelation defines, which relation needs to exist between [Rule.OfType] and the object to inherit the relationship status.
+	// WithRelation defines, which relation needs to exist between OfType and the object to inherit the relationship status.
 	WithRelation string `json:"withRelation,omitempty"`
 	// Rules should not be set directly, but are public to make serializing rules easier.
-	// The purpose of [Rule.Rules] is to allow combining rules. This should be done with functions such as [AnyOf] to properly mark the rule.
+	// The purpose of Rules is to allow combining rules. This should be done with functions such as [AnyOf] to properly mark the rule.
 	Rules []Rule `json:"rules,omitempty"`
 }
 
@@ -72,7 +72,7 @@ type InferredRule struct {
 	WithRelationToSubject []string
 }
 
-// A map of objects to map of relations to sorted rulesets of [InferredRule]s.
+// A map of objects to map of relations to sorted rulesets of [InferredRule].
 type InferredRuleMap map[string]map[string][]InferredRule
 
 // The ObjectMap is the primary input of a model and is required to create a model

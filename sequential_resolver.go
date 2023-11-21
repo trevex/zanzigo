@@ -15,9 +15,9 @@ type SequentialResolver struct {
 }
 
 // NewSequentialResolver creates a new resolver for the particular [Model] using the designated [Storage]-implementation.
-// The main purpose of the [SequentialResolver] is to traverse the ReBAC-policies and check whether a [Tuple] is authorized or not.
 // During creation the inferred rules of the [Model] are used to precompute storage-specific [Userdata] that can be used
 // to speed up checks (when calling Storage.QueryChecks internally).
+// When Check is called the [Userdata] is passed on to the [Storage]-implementation as part of the [Check].
 //
 // maxDepth limits the depth of the traversal of the authorization-model during checks.
 func NewSequentialResolver(model *Model, storage Storage, maxDepth int) (*SequentialResolver, error) {

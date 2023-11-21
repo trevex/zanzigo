@@ -55,7 +55,7 @@ func TestMain(m *testing.M) {
 		if err != nil {
 			log.Fatalf("Could not start resource: %s", err)
 		}
-		resource.Expire(300) // In any case container should be killed in 5min
+		_ = resource.Expire(300) // In any case container should be killed in 5min
 
 		hostAndPort := resource.GetHostPort("5432/tcp")
 		databaseURL = fmt.Sprintf("postgres://zanzigo:zanzigo@%s/zanzigo?sslmode=disable", hostAndPort)
@@ -111,13 +111,21 @@ func TestPostgresWithTestSuite(t *testing.T) {
 		"queries": testsuite.TestConfig{
 			Storage: storage,
 			Expectations: testsuite.Expectations{
-				UserdataCheckQueryTuple: zanzigo.MarkedTuple{0, 2, zanzigo.Tuple{"doc", "mydoc", "parent", "folder", "myfolder", ""}},
+				UserdataCheckQueryTuple: zanzigo.MarkedTuple{
+					CheckIndex: 0,
+					RuleIndex:  2,
+					Tuple:      zanzigo.TupleString("doc:mydoc#parent@folder:myfolder"),
+				},
 			},
 		},
 		"functions": testsuite.TestConfig{
 			Storage: storageFunctions,
 			Expectations: testsuite.Expectations{
-				UserdataCheckQueryTuple: zanzigo.MarkedTuple{0, 0, zanzigo.Tuple{"doc", "mydoc", "viewer", "user", "myuser", ""}},
+				UserdataCheckQueryTuple: zanzigo.MarkedTuple{
+					CheckIndex: 0,
+					RuleIndex:  0,
+					Tuple:      zanzigo.TupleString("doc:mydoc#viewer@user:myuser"),
+				},
 			},
 		},
 	})
@@ -125,34 +133,27 @@ func TestPostgresWithTestSuite(t *testing.T) {
 
 func TestPostgresQueryBuilding(t *testing.T) {
 	resolver, err := zanzigo.NewSequentialResolver(testsuite.Model, storage, 16)
-	if err != nil {
-		t.Fatalf("Resolver creation failed: %v", err)
-	}
+	require.NoError(t, err)
+
 	ruleset := resolver.RulesetFor("doc", "viewer")
 	query := newPostgresQuery(ruleset)
-	expectedQueryString := standardizeSpaces(`
+	expectedQuery := standardizeSpaces(`
 		(SELECT 0 AS rule_index, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='doc' AND object_id=%s AND (object_relation='editor' OR object_relation='owner' OR object_relation='viewer') AND subject_type=%s AND subject_id=%s AND subject_relation=%s)
 		UNION ALL
 		(SELECT 1 AS rule_index, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='doc' AND object_id=%s AND (object_relation='editor' OR object_relation='owner' OR object_relation='viewer') AND subject_relation <> '')
 		UNION ALL
 		(SELECT 2 AS rule_index, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='doc' AND object_id=%s AND (object_relation='parent') AND subject_type='folder')
 	`)
-	if query.query != expectedQueryString {
-		t.Fatalf("Expected computed query for checks to be:\n%s\n, but got:\n%s\n", expectedQueryString, query.query)
-	}
+	require.Equal(t, expectedQuery, query.query)
 }
 
 func TestPostgresFunctionBuilding(t *testing.T) {
 	storageFunctions, err := NewPostgresStorage(databaseURL, UseFunctions())
-	if err != nil {
-		t.Fatalf("PostgresStorage creation failed: %v", err)
-	}
+	require.NoError(t, err)
 	defer storageFunctions.Close()
 
 	resolver, err := zanzigo.NewSequentialResolver(testsuite.Model, storageFunctions, 16)
-	if err != nil {
-		t.Fatalf("Resolver creation failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	ruleset := resolver.RulesetFor("doc", "viewer")
 
@@ -198,23 +199,19 @@ BEGIN
 END;
 $$;`)
 	require.Equal(t, expectedDecl, decl)
-	if query != expectedQuery {
-		t.Fatalf("Expected query for function `%s`, but got: %s", expectedQuery, query)
-	}
+	require.Equal(t, expectedQuery, query)
 
-	pgStorage := storageFunctions.(*postgresStorage)
-	_, err = pgStorage.newPostgresFunction("doc", "viewer", ruleset)
+	_, err = storageFunctions.newPostgresFunction("doc", "viewer", ruleset)
 	if err != nil {
 		t.Fatalf("Expected function to be created, but failed with: %v", err)
 	}
 
 }
 
-func BenchmarkResolverWithPostgres(b *testing.B) {
+func BenchmarkPostgres(b *testing.B) {
 	storageFunctions, err := NewPostgresStorage(databaseURL, UseFunctions())
-	if err != nil {
-		b.Fatalf("PostgresStorage creation failed: %v", err)
-	}
+	require.NoError(b, err)
+
 	defer storageFunctions.Close()
 	testsuite.RunBenchmarkAll(b, map[string]zanzigo.Storage{
 		"queries":   storage,

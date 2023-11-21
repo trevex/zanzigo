@@ -7,6 +7,7 @@ import (
 	"log"
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	"github.com/trevex/zanzigo"
 	"golang.org/x/exp/slices"
 )
@@ -137,9 +138,7 @@ type Expectations struct {
 
 func RunTest(t *testing.T, storage zanzigo.Storage, expectations Expectations) {
 	resolver, err := zanzigo.NewSequentialResolver(Model, storage, 16)
-	if err != nil {
-		t.Fatalf("Expected Resolver creation to not error on: %v", err)
-	}
+	require.NoError(t, err)
 
 	t.Run("checks", func(t *testing.T) {
 		result, err := resolver.Check(context.Background(), zanzigo.Tuple{
@@ -149,9 +148,8 @@ func RunTest(t *testing.T, storage zanzigo.Storage, expectations Expectations) {
 			SubjectType:    "user",
 			SubjectID:      "myuser",
 		})
-		if !result || err != nil {
-			t.Fatalf("Expected resolver.Check to return true, <nil>, but got %v, %v instead", result, err)
-		}
+		require.NoError(t, err)
+		require.True(t, result)
 
 		result, err = resolver.Check(context.Background(), zanzigo.Tuple{
 			ObjectType:     "doc",
@@ -160,17 +158,14 @@ func RunTest(t *testing.T, storage zanzigo.Storage, expectations Expectations) {
 			SubjectType:    "user",
 			SubjectID:      "myuser",
 		})
-		if result || err != nil {
-			t.Fatalf("Expected resolver.Check to return false, <nil>, but got %v, %v instead", result, err)
-		}
+		require.NoError(t, err)
+		require.False(t, result)
 	})
 
 	t.Run("userdata", func(t *testing.T) {
 		ruleset := resolver.RulesetFor("doc", "viewer")
 		userdata, err := storage.PrepareRuleset("doc", "viewer", ruleset)
-		if err != nil {
-			t.Fatalf("Userdata creationed failed: %v", err)
-		}
+		require.NoError(t, err)
 
 		ctx := context.Background()
 		tuples, err := storage.QueryChecks(ctx, []zanzigo.Check{{
@@ -184,9 +179,7 @@ func RunTest(t *testing.T, storage zanzigo.Storage, expectations Expectations) {
 			Userdata: userdata,
 			Ruleset:  ruleset,
 		}})
-		if err != nil {
-			t.Fatalf("Expected query to not err: %v", err)
-		}
+		require.NoError(t, err)
 
 		expectedTuples := []zanzigo.MarkedTuple{expectations.UserdataCheckQueryTuple}
 		if slices.CompareFunc(tuples, expectedTuples, func(a, b zanzigo.MarkedTuple) int {
@@ -208,9 +201,7 @@ func RunBenchmarkAll(b *testing.B, storages map[string]zanzigo.Storage) {
 
 func RunBenchmark(b *testing.B, storage zanzigo.Storage) {
 	resolver, err := zanzigo.NewSequentialResolver(Model, storage, 16)
-	if err != nil {
-		b.Fatalf("Resolver creation failed: %v", err)
-	}
+	require.NoError(b, err)
 
 	// TODO: generate junk data?
 
@@ -223,9 +214,7 @@ func RunBenchmark(b *testing.B, storage zanzigo.Storage) {
 				SubjectType:    "user",
 				SubjectID:      "myuser",
 			})
-			if err != nil {
-				b.Fatalf("resolver.Check failed: %v", err)
-			}
+			require.NoError(b, err)
 		}
 	})
 	b.Run("direct", func(b *testing.B) {
@@ -237,9 +226,7 @@ func RunBenchmark(b *testing.B, storage zanzigo.Storage) {
 				SubjectType:    "user",
 				SubjectID:      "myowner",
 			})
-			if err != nil {
-				b.Fatalf("resolver.Check failed: %v", err)
-			}
+			require.NoError(b, err)
 		}
 	})
 }
