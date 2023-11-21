@@ -70,11 +70,10 @@ if err != nil {
 }
 ```
 
-To traverse the authorization-model and check a permission, you need a resolver,
-such as [`SequentialResolver`](#resolver):
+To traverse the authorization-model and check a permission, you need a resolver:
 
 ```go
-resolver, err := zanzigo.NewSequentialResolver(model, storage, 16)
+resolver, err := zanzigo.NewResolver(model, storage, 16)
 if err != nil {
     // ...
 }
@@ -112,14 +111,6 @@ This storage-implementation prepares Postgres-functions, which will traverse the
 This means only a single query is issues calling a particular function and directly return the result of the check.
 
 Both flavors have advantages and disadvantages, but are compatible, so swapping is possible at any time.
-
-## Resolver
-
-### Sequential
-
-The `SequentialResolver` traverse the tree each depth at a time as long as the storage-implementation supports it.
-The name might be slightly misleading as no parallelism is required with current storage-implementations.
-As the storage-implementation takes care of concurrency, while the resolver collects all results of a given depth.
 
 ## Development
 

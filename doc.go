@@ -52,9 +52,9 @@
 //	// Members of group 'mygroup' are viewers of folder 'myfolder'
 //	_ = storage.Write(ctx, zanzigo.TupleString("folder:myfolder#viewer@group:mygroup#member"))
 //
-// Using a [Resolver] such as [SequentialResolver] permissions can be checked by traversing the tuples using the rules of the authorization-model:
+// Using a [Resolver] permissions can be checked by traversing the tuples using the inferred rules of the authorization-model:
 //
-//	resolver, _ := zanzigo.NewSequentialResolver(model, storage, 16)
+//	resolver, _ := zanzigo.NewSResolver(model, storage, 16)
 //	// Based on the indirect permission through the group's permissions on the folder,
 //	// the following would return 'true':
 //	result, _ := resolver.Check(context.Background(), zanzigo.TupleString("doc:mydoc#viewer@user:myuser"))
