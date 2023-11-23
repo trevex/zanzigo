@@ -33,6 +33,7 @@ func NewResolver(model *Model, storage Storage, maxDepth int) (*Resolver, error)
 
 // Checks whether the relationship stated by [Tuple] t is true.
 func (r *Resolver) Check(ctx context.Context, t Tuple) (bool, error) {
+	// TODO: check if tuple is valid!? Does relation exist!
 	ruleset, ok := r.rules[t.ObjectType][t.ObjectRelation]
 	if !ok {
 		return false, fmt.Errorf("failed to find %s > %s in query map", t.ObjectType, t.ObjectRelation)

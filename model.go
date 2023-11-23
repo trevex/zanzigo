@@ -96,7 +96,9 @@ type Model struct {
 // NewModel checks the [ObjectMap] for correctness and will infer the rules and
 // prepare them for check-resolution.
 func NewModel(objects ObjectMap) (*Model, error) {
-	// TODO: check objects for correctness!
+	if err := validateObjects(objects); err != nil {
+		return nil, err
+	}
 	return &Model{
 		InferredRules: inferRules(objects),
 	}, nil
@@ -111,6 +113,70 @@ func (m *Model) RulesetFor(object, relation string) []InferredRule {
 		return nil
 	}
 	return relations[relation]
+}
+
+func validateObjects(objects ObjectMap) error {
+	for object, relations := range objects {
+		for relation, rule := range relations {
+			err := validateRule(objects, object, relation, rule)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// TODO: add object, relation to every error
+func validateRule(objects ObjectMap, object, relation string, rule Rule) error {
+	// For AnyOf-rules we iterate over the subrules
+	if rule.InheritIf == anyOfPlaceholder {
+		if rule.OfType != "" {
+			return fmt.Errorf("Invalid Rule: AnyOf-rules should not specify a OfType!")
+		}
+		if rule.WithRelation != "" {
+			return fmt.Errorf("Invalid Rule: AnyOf-rules should not specify a WithRelation!")
+		}
+		for _, subrule := range rule.Rules {
+			err := validateRule(objects, object, relation, subrule)
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	if (rule.OfType != "" && rule.WithRelation == "") || (rule.OfType == "" && rule.WithRelation != "") {
+		return fmt.Errorf("Invalid Rule: Both OfType and WithRelation need to be specified or left empty.")
+	}
+	if rule.OfType != "" {
+		if rule.InheritIf == "" {
+			return fmt.Errorf("Invalid Rule: InheritIf is mandatory for when OfType is specified")
+		}
+		relations, ok := objects[rule.OfType]
+		if !ok {
+			return fmt.Errorf("Invalid Rule: Object type '%s' specified by OfType does not exist", rule.OfType)
+		}
+		_, ok = relations[rule.InheritIf]
+		if !ok {
+			return fmt.Errorf("InvalidRule: Relation '%s' of '%s' referenced by InheritIf does not exist", rule.WithRelation, rule.OfType)
+		}
+
+		_, ok = objects[object][rule.WithRelation]
+		if !ok {
+			return fmt.Errorf("InvalidRule: Relation '%s' of '%s' referenced by WithRelation does not exist", rule.WithRelation, object)
+		}
+		return nil // NO ADDITIONAL CHECKS REQUIRED
+	}
+
+	if rule.InheritIf != "" {
+		_, ok := objects[object][rule.InheritIf]
+		if !ok {
+			return fmt.Errorf("InvalidRule: Relation '%s' of '%s' referenced by InheritIf does not exist", rule.InheritIf, object)
+		}
+	}
+
+	return nil
 }
 
 func inferRules(objects ObjectMap) InferredRuleMap {
