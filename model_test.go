@@ -52,6 +52,10 @@ func TestModel(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	require.True(t, model.IsValid(zanzigo.TupleString("doc:mydoc#viewer@user:myuser")))
+	require.True(t, model.IsValid(zanzigo.TupleString("doc:mydoc#viewer@group:mygroup#member")))
+	require.False(t, model.IsValid(zanzigo.TupleString("wrong:mydoc#viewer@group:mygroup#member")))
+
 	ruleset := model.RulesetFor("doc", "viewer")
 	expected := []zanzigo.InferredRule{
 		{Kind: zanzigo.KindDirect, Object: "doc", Relations: []string{"editor", "owner", "viewer"}},

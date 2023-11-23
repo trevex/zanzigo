@@ -86,11 +86,14 @@ type ObjectMap map[string]RelationMap
 // RelationMap maps relationship-names to rules.
 type RelationMap map[string]Rule
 
+type validationMap map[string]map[string]struct{}
+
 // A Model is the authorization model created from an [ObjectMap].
 // During creation the model-definition provided by an [ObjectMap] is computed
 // into a lower-lever ruleset of [InferredRule]s.
 type Model struct {
 	InferredRules InferredRuleMap
+	validations   validationMap
 }
 
 // NewModel checks the [ObjectMap] for correctness and will infer the rules and
@@ -101,6 +104,7 @@ func NewModel(objects ObjectMap) (*Model, error) {
 	}
 	return &Model{
 		InferredRules: inferRules(objects),
+		validations:   validations(objects),
 	}, nil
 }
 
@@ -113,6 +117,39 @@ func (m *Model) RulesetFor(object, relation string) []InferredRule {
 		return nil
 	}
 	return relations[relation]
+}
+
+// TODO: add input validation to examples and document properly
+func (m *Model) IsValid(t Tuple) bool {
+	ors, ok := m.validations[t.ObjectType]
+	if !ok {
+		return false
+	}
+	if _, ok := ors[t.ObjectRelation]; !ok {
+		return false
+	}
+
+	srs, ok := m.validations[t.SubjectType]
+	if !ok {
+		return false
+	}
+	if t.SubjectRelation != "" {
+		if _, ok := srs[t.SubjectRelation]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func validations(objects ObjectMap) validationMap {
+	vs := validationMap{}
+	for object, relations := range objects {
+		vs[object] = map[string]struct{}{}
+		for relation, _ := range relations {
+			vs[object][relation] = struct{}{}
+		}
+	}
+	return vs
 }
 
 func validateObjects(objects ObjectMap) error {
