@@ -71,6 +71,7 @@ func Load(ctx context.Context, storage zanzigo.Storage) error {
 		return nil
 	}
 
+	// 'myuser' is member of 'mygroup' and 'mygroup' viewer of folder containing 'mydoc'
 	err = storage.Write(ctx, zanzigo.Tuple{
 		ObjectType:     "group",
 		ObjectID:       "mygroup",
@@ -116,6 +117,17 @@ func Load(ctx context.Context, storage zanzigo.Storage) error {
 		return err
 	}
 
+	err = storage.Write(ctx, zanzigo.Tuple{
+		ObjectType:     "folder",
+		ObjectID:       "myfolder",
+		ObjectRelation: "editor",
+		SubjectType:    "user",
+		SubjectID:      "myfoldereditoruser",
+	})
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -141,25 +153,56 @@ func RunTest(t *testing.T, storage zanzigo.Storage, expectations Expectations) {
 	require.NoError(t, err)
 
 	t.Run("checks", func(t *testing.T) {
-		result, err := resolver.Check(context.Background(), zanzigo.Tuple{
-			ObjectType:     "doc",
-			ObjectID:       "mydoc",
-			ObjectRelation: "viewer",
-			SubjectType:    "user",
-			SubjectID:      "myuser",
-		})
+		ctx := context.Background()
+
+		// Check 'myuser'
+		result, err := resolver.Check(ctx, zanzigo.TupleString("doc:mydoc#viewer@user:myuser"))
 		require.NoError(t, err)
 		require.True(t, result)
 
-		result, err = resolver.Check(context.Background(), zanzigo.Tuple{
-			ObjectType:     "doc",
-			ObjectID:       "mydoc",
-			ObjectRelation: "editor",
-			SubjectType:    "user",
-			SubjectID:      "myuser",
-		})
+		result, err = resolver.Check(ctx, zanzigo.TupleString("doc:mydoc#editor@user:myuser"))
 		require.NoError(t, err)
 		require.False(t, result)
+
+		// Check 'myowner'
+		result, err = resolver.Check(ctx, zanzigo.TupleString("doc:mydoc#viewer@user:myowner"))
+		require.NoError(t, err)
+		require.True(t, result)
+
+		result, err = resolver.Check(ctx, zanzigo.TupleString("doc:mydoc#editor@user:myowner"))
+		require.NoError(t, err)
+		require.True(t, result)
+
+		result, err = resolver.Check(ctx, zanzigo.TupleString("doc:mydoc#owner@user:myowner"))
+		require.NoError(t, err)
+		require.True(t, result)
+
+		// Check 'myfoldereditoruser'
+		result, err = resolver.Check(ctx, zanzigo.TupleString("doc:mydoc#viewer@user:myfoldereditoruser"))
+		require.NoError(t, err)
+		require.True(t, result)
+
+		result, err = resolver.Check(ctx, zanzigo.TupleString("doc:mydoc#editor@user:myfoldereditoruser"))
+		require.NoError(t, err)
+		require.True(t, result)
+
+		result, err = resolver.Check(ctx, zanzigo.TupleString("doc:mydoc#owner@user:myfoldereditoruser"))
+		require.NoError(t, err)
+		require.False(t, result)
+
+		// Check 'myowner' with resource that does not exist
+		result, err = resolver.Check(ctx, zanzigo.TupleString("doc:nonexistent#viewer@user:myowner"))
+		require.NoError(t, err)
+		require.False(t, result)
+
+		result, err = resolver.Check(ctx, zanzigo.TupleString("doc:nonexistent#editor@user:myowner"))
+		require.NoError(t, err)
+		require.False(t, result)
+
+		result, err = resolver.Check(ctx, zanzigo.TupleString("doc:nonexistent#owner@user:myowner"))
+		require.NoError(t, err)
+		require.False(t, result)
+
 	})
 
 	t.Run("userdata", func(t *testing.T) {
