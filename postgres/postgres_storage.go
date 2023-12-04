@@ -101,7 +101,7 @@ func (s *PostgresStorage) Read(ctx context.Context, t zanzigo.Tuple) (uuid.UUID,
 
 func (s *PostgresStorage) PrepareRuleset(object, relation string, ruleset []zanzigo.InferredRule) (zanzigo.Userdata, error) {
 	if !s.useFunctions {
-		return queryWithPlaceholdersFor(ruleset), nil
+		return SelectQueryFor(ruleset, true, "$%d")
 	}
 	return s.createOrReplaceFunctionFor(object, relation, ruleset)
 }
@@ -118,10 +118,13 @@ func (s *PostgresStorage) QueryChecks(ctx context.Context, crs []zanzigo.Check) 
 ///////////////////////////////////////////////////////////////////////////////
 
 func (s *PostgresStorage) queryChecksWithQuery(ctx context.Context, checks []zanzigo.Check) ([]zanzigo.MarkedTuple, error) {
+	// TODO: current implementation could be more memory efficient by using buffer
 	argNum := 1
 	placesholders := make([]any, 0, len(checks)*6)
 	args := make([]any, 0, len(checks)*4)
 	queries := make([]string, 0, len(checks))
+
+	// We iterate over all check and combine all the queries
 	for i, check := range checks {
 		query, ok := check.Userdata.(string)
 		if !ok {
@@ -165,30 +168,6 @@ func (s *PostgresStorage) queryChecksWithQuery(ctx context.Context, checks []zan
 	return tuples, nil
 }
 
-// precompute the query for the specific ruleset
-func queryWithPlaceholdersFor(ruleset []zanzigo.InferredRule) string {
-	parts := make([]string, 0, len(ruleset))
-	for id, rule := range ruleset {
-		relations := "(" + strings.Join(lo.Map(rule.Relations, func(r string, _ int) string {
-			return "object_relation='" + r + "'"
-		}), " OR ") + ")"
-		switch rule.Kind {
-		case zanzigo.KindDirect:
-			// Has 4 substitutions still to do: $1, $2, $3, $4 (if we assume it is first ruleset of a batch)
-			parts = append(parts, fmt.Sprintf("(SELECT %d AS rule_index, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='%s' AND object_id=$%%d AND %s AND subject_type=$%%d AND subject_id=$%%d AND subject_relation=$%%d)", id, rule.Object, relations))
-		case zanzigo.KindDirectUserset:
-			// Only requires one additional substitions $1 (only first arg, which is .ObjectID)
-			parts = append(parts, fmt.Sprintf("(SELECT %d AS rule_index, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='%s' AND object_id=$%%d AND %s AND subject_relation <> '')", id, rule.Object, relations))
-		case zanzigo.KindIndirect:
-			// Only requires one additional substitions $1 (only first arg, which is .ObjectID)
-			parts = append(parts, fmt.Sprintf("(SELECT %d AS rule_index, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='%s' AND object_id=$%%d AND %s AND subject_type='%s')", id, rule.Object, relations, rule.Subject))
-		default:
-			panic("unreachable")
-		}
-	}
-	return strings.Join(parts, " UNION ALL ")
-}
-
 ///////////////////////////////////////////////////////////////////////////////
 // FUNCTION-BASED IMPLEMENTATION
 ///////////////////////////////////////////////////////////////////////////////
@@ -215,72 +194,11 @@ func (s *PostgresStorage) queryChecksWithFunction(ctx context.Context, checks []
 }
 
 func (s *PostgresStorage) createOrReplaceFunctionFor(object, relation string, ruleset []zanzigo.InferredRule) (string, error) {
-	funcDecl, query := functionAndQueryFor(object, relation, ruleset)
-
-	_, err := s.pool.Exec(context.Background(), funcDecl)
-	return query, err
-}
-
-// TODO: respect maxDepth!
-func functionAndQueryFor(object, relation string, ruleset []zanzigo.InferredRule) (string, string) {
-	innerSelect := strings.Join(lo.Map(ruleset, func(rule zanzigo.InferredRule, id int) string {
-		relations := "(" + strings.Join(lo.Map(rule.Relations, func(r string, _ int) string {
-			return "object_relation='" + r + "'"
-		}), " OR ") + ")"
-		switch rule.Kind {
-		case zanzigo.KindDirect:
-			return fmt.Sprintf("(SELECT %d AS rule_index, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='%s' AND object_id=$1 AND %s AND subject_type=$2 AND subject_id=$3 AND subject_relation=$4)", id, rule.Object, relations)
-		case zanzigo.KindDirectUserset:
-			return fmt.Sprintf("(SELECT %d AS rule_index, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='%s' AND object_id=$1 AND %s AND subject_relation <> '')", id, rule.Object, relations)
-		case zanzigo.KindIndirect:
-			return fmt.Sprintf("(SELECT %d AS rule_index, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE object_type='%s' AND object_id=$1 AND %s AND subject_type='%s')", id, rule.Object, relations, rule.Subject)
-		default:
-			panic("unreachable")
-		}
-	}), " UNION ALL ") + " ORDER BY rule_index"
-	conditions := ""
-	for id, rule := range ruleset {
-		if id == 0 {
-			conditions += "IF "
-		} else {
-			conditions += "ELSIF "
-		}
-		conditions += fmt.Sprintf("mt.rule_index = %d THEN\n", id)
-		switch rule.Kind {
-		case zanzigo.KindDirect:
-			conditions += "RETURN TRUE;\n"
-		case zanzigo.KindDirectUserset:
-			conditions += addResultCheck("EXECUTE FORMAT('SELECT zanzigo_%s_%s($1, $2, $3, $4)', mt.subject_type, mt.subject_relation) USING mt.subject_id, $2, $3, $4 INTO result;\n")
-		case zanzigo.KindIndirect:
-			relations := rule.WithRelationToSubject
-			for _, relation := range relations {
-				conditions += addResultCheck(fmt.Sprintf("SELECT zanzigo_%s_%s(mt.subject_id, $2, $3, $4) INTO result;\n", rule.Subject, relation))
-			}
-		default:
-			panic("unreachable")
-		}
-		if id == len(ruleset)-1 {
-			conditions += "END IF;"
-		}
+	funcDecl, query, err := FunctionFor(fmt.Sprintf("zanzigo_%s_%s", object, relation), ruleset)
+	if err != nil {
+		return "", err
 	}
-	funcName := fmt.Sprintf("zanzigo_%s_%s", object, relation)
-	funcDecl := fmt.Sprintf(`CREATE OR REPLACE FUNCTION %s(TEXT, TEXT, TEXT, TEXT) RETURNS BOOLEAN LANGUAGE 'plpgsql' AS $$
-DECLARE
-mt RECORD;
-result BOOLEAN;
-BEGIN
-FOR mt IN
-%s
-LOOP
-%s
-END LOOP;
-RETURN FALSE;
-END;
-$$;`, funcName, innerSelect, conditions)
 
-	return funcDecl, "SELECT " + funcName + "($1, $2, $3, $4)"
-}
-
-func addResultCheck(in string) string {
-	return in + "IF result = TRUE THEN\nRETURN TRUE;\nEND IF;\n"
+	_, err = s.pool.Exec(context.Background(), funcDecl)
+	return query, err
 }

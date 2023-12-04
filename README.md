@@ -94,6 +94,13 @@ Details regarding the storage- and resolver-implementation can be found below or
 
 ### Postgres
 
+Make sure the database migrations ran before creating the storage-backend:
+```go
+if err := postgres.RunMigrations(databaseURL); err != nil {
+    log.Fatalf("Could not migrate db: %s", err)
+}
+```
+
 The Postgres implementation comes in two flavors. One is using queries:
 
 ```go
@@ -113,6 +120,23 @@ This storage-implementation prepares Postgres-functions, which will traverse the
 This means only a single query is issues calling a particular function and directly return the result of the check.
 
 Both flavors have advantages and disadvantages, but are compatible, so swapping is possible at any time.
+
+### SQLite3
+
+Alternatively SQLite3 can be used as follow:
+```go
+dbfile := "./sqlite.db" # URL parameters from mattn/go-sqlite3 can be used
+if err := sqlite3.RunMigrations(dbfile); err != nil {
+    log.Fatalf("Could not migrate db: %s", err)
+}
+storage, err := sqlite3.NewSQLiteStorage(dbfile)
+```
+
+### Which storage implementation to use?
+
+This really depends on which underlying database will fulfill your needs (so familiarize yourself with their trade-offs):
+1. SQLite3 can be a very lean choice. Consider using [Litestream](https://github.com/benbjohnson/litestream) or [LiteFS](https://github.com/superfly/litefs) to scale beyond a single replica, e.g. multiple read-replicas.
+2. Postgres is a well-known choice and the function-based implementation allows checks to fully execute on the database-side. Both function and query-based flavors should work with [Neon](https://github.com/neondatabase/neon), while only query-based approach is expected to be compatible with [CockroachDB](https://github.com/cockroachdb/cockroach).
 
 ## Development
 
