@@ -33,7 +33,7 @@ VOLATILE;
 CREATE FUNCTION public.timestamp_from_uuid_v7(_uuid uuid)
 RETURNS timestamp without time zone
 LANGUAGE sql
-IMMUTABLE PARALLEL SAFE STRICT LEAKPROOF
+IMMUTABLE PARALLEL SAFE STRICT
 AS $$
   SELECT to_timestamp(('x0000' || substr(_uuid::text, 1, 8) || substr(_uuid::text, 10, 4))::bit(64)::bigint::numeric / 1000);
 $$
