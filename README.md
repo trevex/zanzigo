@@ -134,9 +134,11 @@ storage, err := sqlite3.NewSQLiteStorage(dbfile)
 
 ### Which storage implementation to use?
 
-This really depends on which underlying database will fulfill your needs (so familiarize yourself with their trade-offs):
-1. SQLite3 can be a very lean choice. Consider using [Litestream](https://github.com/benbjohnson/litestream) or [LiteFS](https://github.com/superfly/litefs) to scale beyond a single replica, e.g. multiple read-replicas.
-2. Postgres is a well-known choice and the function-based implementation allows checks to fully execute on the database-side. Both function and query-based flavors should work with [Neon](https://github.com/neondatabase/neon), while only query-based approach is expected to be compatible with [CockroachDB](https://github.com/cockroachdb/cockroach).
+This really depends on which underlying database will fulfill your needs, so familiarize yourself with their trade-offs using the upstream documentation.
+
+You might also want to consider the following on day 2:
+1. You can use [Litestream](https://github.com/benbjohnson/litestream) or [LiteFS](https://github.com/superfly/litefs) to scale beyond a single replica, e.g. multiple read-replicas of SQLite3.
+2. Both function and query-based flavors of the Postgres implementation should work with [Neon](https://github.com/neondatabase/neon), while only query-based approach is expected to be compatible with [CockroachDB](https://github.com/cockroachdb/cockroach).
 
 ## Development
 
