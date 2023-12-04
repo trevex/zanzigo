@@ -62,6 +62,11 @@ func (r *Resolver) check(ctx context.Context, checks []Check, depth int) (bool, 
 		return false, err
 	}
 
+	// TODO: resolver should support caching:
+	//       1. for each direct-rule of checks, check cache
+	//       2. for marked tuples returned: if direct, store in cache
+	// Alternatively, should rules with context be cached with results?
+
 	nextChecks := []Check{}
 	// Returned marked tuples are ordered by .RuleIndex and rules are ordered with directs first,
 	// so we can exit early if we find a direct relationship before continuing to subsequent checks.
