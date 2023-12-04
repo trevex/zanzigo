@@ -145,7 +145,7 @@ func validations(objects ObjectMap) validationMap {
 	vs := validationMap{}
 	for object, relations := range objects {
 		vs[object] = map[string]struct{}{}
-		for relation, _ := range relations {
+		for relation := range relations {
 			vs[object][relation] = struct{}{}
 		}
 	}
