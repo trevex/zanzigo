@@ -108,7 +108,7 @@ func TestPostgresWithTestSuite(t *testing.T) {
 	}
 	defer storageFunctions.Close()
 	testsuite.RunTestAll(t, map[string]testsuite.TestConfig{
-		"queries": testsuite.TestConfig{
+		"queries": {
 			Storage: storage,
 			Expectations: testsuite.Expectations{
 				UserdataCheckQueryTuple: zanzigo.MarkedTuple{
@@ -118,7 +118,7 @@ func TestPostgresWithTestSuite(t *testing.T) {
 				},
 			},
 		},
-		"functions": testsuite.TestConfig{
+		"functions": {
 			Storage: storageFunctions,
 			Expectations: testsuite.Expectations{
 				UserdataCheckQueryTuple: zanzigo.MarkedTuple{

@@ -260,7 +260,7 @@ func inferRule(objects ObjectMap, object, relation string, rule Rule) []Inferred
 
 	// Always include direct-relationship
 	rules := []InferredRule{
-		InferredRule{
+		{
 			Object:    object,
 			Relations: []string{relation},
 		},

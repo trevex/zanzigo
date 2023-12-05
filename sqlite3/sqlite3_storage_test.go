@@ -50,7 +50,7 @@ func TestMain(m *testing.M) {
 
 func TestSQLite3WithTestSuite(t *testing.T) {
 	testsuite.RunTestAll(t, map[string]testsuite.TestConfig{
-		"queries": testsuite.TestConfig{
+		"queries": {
 			Storage: storage,
 			Expectations: testsuite.Expectations{
 				UserdataCheckQueryTuple: zanzigo.MarkedTuple{
