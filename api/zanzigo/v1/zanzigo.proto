@@ -1,0 +1,42 @@
+syntax = "proto3";
+
+package zanzigo.v1;
+
+option go_package = "github.com/trevex/zanzigo/api/zanzigo/v1;zanzigov1";
+
+message Tuple {
+  string object_type = 1;
+  string object_id = 2;
+  string object_relation = 3;
+  string subject_type = 4;
+  string subject_id = 5;
+  string subject_relation = 6;
+}
+
+message WriteRequest {
+  Tuple tuple = 1;
+}
+
+message WriteResponse {}
+
+message ReadRequest {
+  Tuple tuple = 1;
+}
+
+message ReadResponse {
+  string uuid = 1;
+}
+
+message CheckRequest {
+  Tuple tuple = 1;
+}
+
+message CheckResponse {
+  bool result = 1;
+}
+
+service ZanzigoService {
+  rpc Write(WriteRequest) returns (WriteResponse) {}
+  rpc Read(ReadRequest) returns (ReadResponse) {}
+  rpc Check(CheckRequest) returns (CheckResponse) {}
+}
