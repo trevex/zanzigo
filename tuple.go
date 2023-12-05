@@ -1,8 +1,10 @@
 package zanzigo
 
-import "strings"
+import (
+	"strings"
+)
 
-// / ⟨tuple⟩ ::= ⟨object⟩‘#’⟨relation⟩‘@’⟨user⟩
+// ⟨tuple⟩ ::= ⟨object⟩‘#’⟨relation⟩‘@’⟨user⟩
 type Tuple struct {
 	/// ⟨object⟩ ::= ⟨namespace⟩‘:’⟨object id⟩
 	ObjectType string `json:"object_type"`

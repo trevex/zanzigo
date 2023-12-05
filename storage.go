@@ -26,7 +26,7 @@ type Check struct {
 }
 
 // A tuple with additional information which [Check] and which [InferredRule] from the [Check] resulted in this tuple.
-// This is used by the [Resolver] to connect resulting tuples to the original instructions to deduct subsquent actions.
+// This is used by the [Resolver] to connect resulting tuples to the original instructions to deduct subsequent actions.
 type MarkedTuple struct {
 	Tuple
 	CheckIndex int
