@@ -25,6 +25,10 @@
             golangci-lint
             delve
             gnumake
+            buf
+            protobuf
+            protoc-gen-go
+            protoc-gen-connect-go
           ];
         };
       }
