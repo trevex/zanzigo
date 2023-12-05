@@ -6,7 +6,7 @@ import (
 	"os"
 
 	"github.com/trevex/zanzigo"
-	"github.com/trevex/zanzigo/postgres"
+	"github.com/trevex/zanzigo/storage/postgres"
 )
 
 func main() {

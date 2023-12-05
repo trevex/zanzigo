@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/trevex/zanzigo"
-	"github.com/trevex/zanzigo/testsuite"
+	testsuite "github.com/trevex/zanzigo/storage"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/ory/dockertest/v3"

@@ -13,7 +13,7 @@ import (
 	_ "github.com/golang-migrate/migrate/v4/database/sqlite3"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
 	"github.com/trevex/zanzigo"
-	"github.com/trevex/zanzigo/postgres"
+	"github.com/trevex/zanzigo/storage/postgres"
 )
 
 //go:embed migrations/*.sql

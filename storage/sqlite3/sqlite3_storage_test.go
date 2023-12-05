@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/trevex/zanzigo"
-	"github.com/trevex/zanzigo/testsuite"
+	testsuite "github.com/trevex/zanzigo/storage"
 )
 
 var (

@@ -1,4 +1,4 @@
-package testsuite
+package storage
 
 import (
 	"cmp"
