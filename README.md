@@ -1,4 +1,5 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/trevex/zanzigo.svg)](https://pkg.go.dev/github.com/trevex/zanzigo)
+[![Go Report Card](https://goreportcard.com/badge/github.com/trevex/zanzigo)](https://goreportcard.com/report/github.com/trevex/zanzigo)
 
 # `zanzigo`
 
