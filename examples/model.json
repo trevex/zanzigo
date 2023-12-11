@@ -1,0 +1,49 @@
+{
+  "user": {},
+  "group": {
+    "member": {}
+  },
+  "folder": {
+    "owner": {},
+    "editor": {
+      "inheritIf": "owner"
+    },
+    "viewer": {
+      "inheritIf": "editor"
+    }
+  },
+  "doc": {
+    "parent": {},
+    "owner": {
+      "inheritIf": "owner",
+      "ofType": "folder",
+      "withRelation": "parent"
+    },
+    "editor": {
+      "inheritIf": "anyOf",
+      "rules": [
+        {
+          "inheritIf": "owner"
+        },
+        {
+          "inheritIf": "editor",
+          "ofType": "folder",
+          "withRelation": "parent"
+        }
+      ]
+    },
+    "viewer": {
+      "inheritIf": "anyOf",
+      "rules": [
+        {
+          "inheritIf": "editor"
+        },
+        {
+          "inheritIf": "viewer",
+          "ofType": "folder",
+          "withRelation": "parent"
+        }
+      ]
+    }
+  }
+}
