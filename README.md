@@ -6,6 +6,8 @@
 The `zanzigo`-library provides building blocks for creating your own [Zanzibar](https://research.google/pubs/pub48190/)-esque authorization service.
 If you are unfamiliar with Google's Zanzibar, check out [zanzibar.academy](https://zanzibar.academy/) by Auth0.
 
+This respository also includes a server-implementation using gRPC/ConnectRPC.
+
 ## Install
 
 ```bash
