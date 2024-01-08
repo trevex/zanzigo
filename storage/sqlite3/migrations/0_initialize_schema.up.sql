@@ -1,6 +1,6 @@
 
 CREATE TABLE tuples (
-    uuid UUID NOT NULL,
+    uuid TEXT NOT NULL,
     object_type TEXT NOT NULL,
     object_id TEXT NOT NULL,
     object_relation TEXT NOT NULL,
