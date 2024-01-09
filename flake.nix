@@ -14,7 +14,10 @@
     in
     flake-utils.lib.eachDefaultSystem (system:
       let
-        pkgs = import nixpkgs { inherit system overlays; };
+        pkgs = import nixpkgs {
+          inherit system overlays;
+          config.allowUnfreePredicate = pkg: builtins.elem (nixpkgs.lib.getName pkg) [ "terraform" ];
+        };
       in
       rec {
         devShell = pkgs.mkShell rec {
@@ -29,6 +32,9 @@
             protobuf
             protoc-gen-go
             protoc-gen-connect-go
+            # for bench
+            terraform
+            google-cloud-sdk
           ];
         };
       }

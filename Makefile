@@ -14,7 +14,7 @@ CMD_ZANZIGO_SRC = cmd/zanzigo/main.go
 
 build: $(CMD_ZANZIGO)
 
-$(CMD_ZANZIGO): $(shell $(FIND) . -type f -name '*.go') dist
+$(CMD_ZANZIGO): $(shell $(FIND) . -type f -name '*.go')
 	mkdir -p build
 	$(GO) build -o build/$(CMD_ZANZIGO) -a $(BUILDFLAGS) $(LDFLAGS) $(CMD_ZANZIGO_SRC)
 
