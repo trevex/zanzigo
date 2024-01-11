@@ -12,7 +12,7 @@ import http from "k6/http";
 import { sleep, check } from "k6";
 export const options = {
   vus: 100,
-  duration: "60s",
+  duration: "600s",
 };
 export default function () {
   const i = Math.floor(Math.random() * 10000)
@@ -49,7 +49,7 @@ import http from "k6/http";
 import { sleep, check } from "k6";
 export const options = {
   vus: 1000,
-  duration: "60s",
+  duration: "600s",
 };
 export default function () {
   const i = Math.floor(Math.random() * 10000)
@@ -91,49 +91,7 @@ client.load([], "zanzigo.proto");
 
 export const options = {
   vus: 100,
-  duration: "60s",
-};
-export default function () {
-  client.connect("10.0.0.5:4000", {
-    plaintext: true
-  });
-
-  const i = Math.floor(Math.random() * 10000)
-  const payload = { tuple: {
-    object_type: "doc",
-    object_id: "mydoc" + i,
-    object_relation: "viewer",
-    subject_type: "user",
-    subject_id: "myuser" + i,
-    subject_relation: ""
-  }};
-
-  const res = client.invoke("zanzigo.v1.ZanzigoService/Check", payload);
-
-  check(res, {
-    "status is OK": (r) => r && r.status === grpc.StatusOK,
-  });
-
-  client.close();
-  sleep(1);
-}
-EOT
-k6 run ~/grpc100.js
-'
-
-time gcloud compute ssh --project nvoss-test --tunnel-through-iap --zone ${REGION}-c bench-${REGION} -- '
-set -euxo pipefail
-cat <<EOT > ~/grpc100reuse.js
-import http from "k6/http";
-import grpc from "k6/net/grpc";
-import { sleep, check } from "k6";
-
-const client = new grpc.Client();
-client.load([], "zanzigo.proto");
-
-export const options = {
-  vus: 100,
-  duration: "60s",
+  duration: "600s",
 };
 export default function () {
   if (__ITER == 0) {
@@ -161,12 +119,12 @@ export default function () {
   sleep(1);
 }
 EOT
-k6 run ~/grpc100reuse.js
+k6 run ~/grpc100.js
 '
 
 time gcloud compute ssh --project nvoss-test --tunnel-through-iap --zone ${REGION}-c bench-${REGION} -- '
 set -euxo pipefail
-cat <<EOT > ~/grpc1000reuse.js
+cat <<EOT > ~/grpc1000.js
 import http from "k6/http";
 import grpc from "k6/net/grpc";
 import { sleep, check } from "k6";
@@ -176,7 +134,7 @@ client.load([], "zanzigo.proto");
 
 export const options = {
   vus: 1000,
-  duration: "60s",
+  duration: "600s",
 };
 export default function () {
   if (__ITER == 0) {
@@ -204,5 +162,5 @@ export default function () {
   sleep(1);
 }
 EOT
-k6 run ~/grpc1000reuse.js
+k6 run ~/grpc1000.js
 '
