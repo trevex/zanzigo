@@ -143,6 +143,41 @@ You might also want to consider the following on day 2:
 1. You can use [Litestream](https://github.com/benbjohnson/litestream) or [LiteFS](https://github.com/superfly/litefs) to scale beyond a single replica, e.g. multiple read-replicas of SQLite3.
 2. Both function and query-based flavors of the Postgres implementation should work with [Neon](https://github.com/neondatabase/neon), while only query-based approach is expected to be compatible with [CockroachDB](https://github.com/cockroachdb/cockroach).
 
+## Benchmark
+
+A benchmark was undertaken on Google Cloud. All the code and the raw results can be found in `./bench`.
+
+The code also includes some micro-benchmarks, that are run locally, which result in the following results on my laptop:
+```
+goos: linux
+goarch: amd64
+pkg: github.com/trevex/zanzigo/storage/postgres
+cpu: 11th Gen Intel(R) Core(TM) i7-1185G7 @ 3.00GHz
+BenchmarkPostgres
+BenchmarkPostgres/queries
+BenchmarkPostgres/queries/indirect_nested_4
+BenchmarkPostgres/queries/indirect_nested_4-8         	    5533	    190032 ns/op	   20151 B/op	     112 allocs/op
+BenchmarkPostgres/queries/direct
+BenchmarkPostgres/queries/direct-8                    	   19274	     61679 ns/op	    5096 B/op	      40 allocs/op
+BenchmarkPostgres/functions
+BenchmarkPostgres/functions/indirect_nested_4
+BenchmarkPostgres/functions/indirect_nested_4-8       	    9423	    127550 ns/op	     802 B/op	      13 allocs/op
+BenchmarkPostgres/functions/direct
+BenchmarkPostgres/functions/direct-8                  	   19890	     60806 ns/op	     801 B/op	      13 allocs/op
+PASS
+goos: linux
+goarch: amd64
+pkg: github.com/trevex/zanzigo/storage/sqlite3
+cpu: 11th Gen Intel(R) Core(TM) i7-1185G7 @ 3.00GHz
+BenchmarkSQLite3
+BenchmarkSQLite3/queries
+BenchmarkSQLite3/queries/indirect_nested_4
+BenchmarkSQLite3/queries/indirect_nested_4-8         	   22962	     52081 ns/op	   13294 B/op	      70 allocs/op
+BenchmarkSQLite3/queries/direct
+BenchmarkSQLite3/queries/direct-8                    	   65703	     18410 ns/op	    3077 B/op	      26 allocs/op
+PASS
+```
+
 ## Development
 
 ### Persistent Postgres

@@ -11,7 +11,7 @@ Google Cloud was used to run the benchmark and the exact zones used were:
 * Bench VM 1: `europe-west1-c`
 * Bench VM 2: `europe-west4-c`
 
-All machines used 4 vCPU and 16GB RAM (`n2-standard-4`) respectively.
+All machines used **4 vCPU and 16GB RAM** (`n2-standard-4`) respectively.
 
 The code is currently mostly hard-coded but left here to study or reproduce results, if desired.
 
@@ -80,6 +80,8 @@ The following table shows request duration measurements
 | `sqlite-http-1000-dr` | 8.73ms | 7.01ms | 8.21ms | 167.71ms | 9.81ms | 10.79ms |
 | `sqlite-grpc-100-dr` | 8.54ms | 7.13ms | 8.28ms | 21.85ms | 9.62ms | 10.52ms |
 | `sqlite-grpc-1000-dr` | 8.92ms | 7.14ms | 8.08ms | 183.73ms | 9.56ms | 11.82ms |
+
+_**NOTE**_: Most likely HTTP is more optimized in k6 than gRPC.
 
 # Raw Results
 

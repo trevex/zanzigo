@@ -1,3 +1,4 @@
 /.direnv/
 /storage/sqlite3/test.db
 /zanzigo.db
+/bench/0-setup/.terraform
