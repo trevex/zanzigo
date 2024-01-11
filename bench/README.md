@@ -55,6 +55,7 @@ All scenarios use `n2-standard-4` (4 vCPU 16GB RAM). If not otherwise mentioned 
 Therefore the scenario naming schema of the table is `{pgquery|pgfunc|sqlite}-{http|grpc}-{vus}[-sd]` (gRPC without connection re-use is excluded).
 
 | Scenario | Request Duration |
+| --- | --- |
 | `pgquery-http-100` | `avg=3.91ms   min=1.06ms  med=2.9ms   max=65.78ms  p(90)=4.55ms  p(95)=5.95ms` |
 | `pgquery-http-1000` | `avg=9.2ms    min=728.67µs med=2.77ms  max=269.05ms p(90)=5.6ms   p(95)=13.19ms` |
 | `pgquery-grpc-100` | `avg=3.94ms min=1.37ms med=3.11ms max=40.09ms p(90)=5.27ms p(95)=8.33ms` |
