@@ -33,6 +33,15 @@ type MarkedTuple struct {
 	RuleIndex  int
 }
 
+var (
+	CursorStart = uuid.Must(uuid.FromString("ffffffff-ffff-ffff-ffff-ffffffffffff"))
+)
+
+type Pagination struct {
+	Limit  int
+	Cursor uuid.UUID // We use UUIDv7, so we can directly use it as cursor as it is sequential
+}
+
 // Storage provides simple CRUD operations for persistence as well as more complex methods
 // required to permission checks as performant as possible.
 type Storage interface {
@@ -41,6 +50,8 @@ type Storage interface {
 	// Reads the specified [Tuple]. As all fields need to be known to read it, the UUID is returned.
 	// If the tuple was not found, [ErrNotFound] is returned.
 	Read(ctx context.Context, t Tuple) (uuid.UUID, error)
+
+	List(ctx context.Context, f Tuple, p Pagination) ([]Tuple, uuid.UUID, error)
 
 	// PrepareRuleset takes an object-type and relation with the inferred ruleset and prepares
 	// the storage-implementation for subsequent checks by optionally returning [Userdata].

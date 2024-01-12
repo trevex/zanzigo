@@ -152,6 +152,20 @@ func RunTest(t *testing.T, storage zanzigo.Storage, expectations Expectations) {
 	resolver, err := zanzigo.NewResolver(Model, storage, 16)
 	require.NoError(t, err)
 
+	t.Run("list", func(t *testing.T) {
+		ctx := context.Background()
+
+		tuples, newCur, err := storage.List(ctx, zanzigo.Tuple{ObjectType: "doc", ObjectID: "mydoc"}, zanzigo.Pagination{Cursor: zanzigo.CursorStart, Limit: 10})
+		require.NoError(t, err)
+		require.Equal(t, 2, len(tuples))
+		require.NotEqual(t, zanzigo.CursorStart.String(), newCur.String())
+
+		tuples, newCur, err = storage.List(ctx, zanzigo.Tuple{ObjectType: "doc", ObjectID: "mydoc"}, zanzigo.Pagination{Cursor: newCur, Limit: 10})
+		require.NoError(t, err)
+		require.Equal(t, 0, len(tuples))
+		require.NotEqual(t, zanzigo.CursorStart.String(), newCur.String())
+	})
+
 	t.Run("checks", func(t *testing.T) {
 		ctx := context.Background()
 

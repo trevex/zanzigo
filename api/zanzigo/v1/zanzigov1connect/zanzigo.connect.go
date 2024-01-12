@@ -39,6 +39,8 @@ const (
 	ZanzigoServiceReadProcedure = "/zanzigo.v1.ZanzigoService/Read"
 	// ZanzigoServiceCheckProcedure is the fully-qualified name of the ZanzigoService's Check RPC.
 	ZanzigoServiceCheckProcedure = "/zanzigo.v1.ZanzigoService/Check"
+	// ZanzigoServiceListProcedure is the fully-qualified name of the ZanzigoService's List RPC.
+	ZanzigoServiceListProcedure = "/zanzigo.v1.ZanzigoService/List"
 )
 
 // ZanzigoServiceClient is a client for the zanzigo.v1.ZanzigoService service.
@@ -46,6 +48,7 @@ type ZanzigoServiceClient interface {
 	Write(context.Context, *connect.Request[v1.WriteRequest]) (*connect.Response[v1.WriteResponse], error)
 	Read(context.Context, *connect.Request[v1.ReadRequest]) (*connect.Response[v1.ReadResponse], error)
 	Check(context.Context, *connect.Request[v1.CheckRequest]) (*connect.Response[v1.CheckResponse], error)
+	List(context.Context, *connect.Request[v1.ListRequest]) (*connect.Response[v1.ListResponse], error)
 }
 
 // NewZanzigoServiceClient constructs a client for the zanzigo.v1.ZanzigoService service. By
@@ -73,6 +76,11 @@ func NewZanzigoServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 			baseURL+ZanzigoServiceCheckProcedure,
 			opts...,
 		),
+		list: connect.NewClient[v1.ListRequest, v1.ListResponse](
+			httpClient,
+			baseURL+ZanzigoServiceListProcedure,
+			opts...,
+		),
 	}
 }
 
@@ -81,6 +89,7 @@ type zanzigoServiceClient struct {
 	write *connect.Client[v1.WriteRequest, v1.WriteResponse]
 	read  *connect.Client[v1.ReadRequest, v1.ReadResponse]
 	check *connect.Client[v1.CheckRequest, v1.CheckResponse]
+	list  *connect.Client[v1.ListRequest, v1.ListResponse]
 }
 
 // Write calls zanzigo.v1.ZanzigoService.Write.
@@ -98,11 +107,17 @@ func (c *zanzigoServiceClient) Check(ctx context.Context, req *connect.Request[v
 	return c.check.CallUnary(ctx, req)
 }
 
+// List calls zanzigo.v1.ZanzigoService.List.
+func (c *zanzigoServiceClient) List(ctx context.Context, req *connect.Request[v1.ListRequest]) (*connect.Response[v1.ListResponse], error) {
+	return c.list.CallUnary(ctx, req)
+}
+
 // ZanzigoServiceHandler is an implementation of the zanzigo.v1.ZanzigoService service.
 type ZanzigoServiceHandler interface {
 	Write(context.Context, *connect.Request[v1.WriteRequest]) (*connect.Response[v1.WriteResponse], error)
 	Read(context.Context, *connect.Request[v1.ReadRequest]) (*connect.Response[v1.ReadResponse], error)
 	Check(context.Context, *connect.Request[v1.CheckRequest]) (*connect.Response[v1.CheckResponse], error)
+	List(context.Context, *connect.Request[v1.ListRequest]) (*connect.Response[v1.ListResponse], error)
 }
 
 // NewZanzigoServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -126,6 +141,11 @@ func NewZanzigoServiceHandler(svc ZanzigoServiceHandler, opts ...connect.Handler
 		svc.Check,
 		opts...,
 	)
+	zanzigoServiceListHandler := connect.NewUnaryHandler(
+		ZanzigoServiceListProcedure,
+		svc.List,
+		opts...,
+	)
 	return "/zanzigo.v1.ZanzigoService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case ZanzigoServiceWriteProcedure:
@@ -134,6 +154,8 @@ func NewZanzigoServiceHandler(svc ZanzigoServiceHandler, opts ...connect.Handler
 			zanzigoServiceReadHandler.ServeHTTP(w, r)
 		case ZanzigoServiceCheckProcedure:
 			zanzigoServiceCheckHandler.ServeHTTP(w, r)
+		case ZanzigoServiceListProcedure:
+			zanzigoServiceListHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -153,4 +175,8 @@ func (UnimplementedZanzigoServiceHandler) Read(context.Context, *connect.Request
 
 func (UnimplementedZanzigoServiceHandler) Check(context.Context, *connect.Request[v1.CheckRequest]) (*connect.Response[v1.CheckResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("zanzigo.v1.ZanzigoService.Check is not implemented"))
+}
+
+func (UnimplementedZanzigoServiceHandler) List(context.Context, *connect.Request[v1.ListRequest]) (*connect.Response[v1.ListResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("zanzigo.v1.ZanzigoService.List is not implemented"))
 }

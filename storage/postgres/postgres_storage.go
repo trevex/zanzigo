@@ -5,6 +5,7 @@ import (
 	"embed"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/trevex/zanzigo"
@@ -97,6 +98,65 @@ func (s *PostgresStorage) Read(ctx context.Context, t zanzigo.Tuple) (uuid.UUID,
 		return uuid, zanzigo.ErrNotFound
 	}
 	return uuid, err
+}
+
+func (s *PostgresStorage) List(ctx context.Context, t zanzigo.Tuple, p zanzigo.Pagination) ([]zanzigo.Tuple, uuid.UUID, error) {
+	args := make([]any, 0, 8)
+	whereClauses := ""
+	if t.ObjectType != "" {
+		args = append(args, t.ObjectType)
+		whereClauses += "object_type=$" + strconv.Itoa(len(args)) + " AND "
+	}
+	if t.ObjectID != "" {
+		args = append(args, t.ObjectID)
+		whereClauses += "object_id=$" + strconv.Itoa(len(args)) + " AND "
+	}
+	if t.ObjectRelation != "" {
+		args = append(args, t.ObjectRelation)
+		whereClauses += "object_relation=$" + strconv.Itoa(len(args)) + " AND "
+	}
+	if t.SubjectType != "" {
+		args = append(args, t.SubjectType)
+		whereClauses += "subject_type=$" + strconv.Itoa(len(args)) + " AND "
+	}
+	if t.SubjectID != "" {
+		args = append(args, t.SubjectID)
+		whereClauses += "subject_id=$" + strconv.Itoa(len(args)) + " AND "
+	}
+	if t.SubjectRelation != "" {
+		args = append(args, t.SubjectRelation)
+		whereClauses += "subject_relation=$" + strconv.Itoa(len(args)) + " AND "
+	}
+
+	args = append(args, p.Cursor)
+	whereClauses += "uuid<$" + strconv.Itoa(len(args))
+
+	args = append(args, p.Limit)
+	limit := "LIMIT $" + strconv.Itoa(len(args))
+
+	rows, err := s.pool.Query(ctx, "SELECT uuid, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE "+whereClauses+" ORDER BY uuid DESC "+limit, args...)
+	if err != nil {
+		return nil, uuid.Nil, err
+	}
+	defer rows.Close()
+
+	tuples := make([]zanzigo.Tuple, 0, p.Limit)
+	cursor := p.Cursor
+
+	for rows.Next() {
+		var t zanzigo.Tuple
+		err := rows.Scan(&cursor, &t.ObjectType, &t.ObjectID, &t.ObjectRelation, &t.SubjectType, &t.SubjectID, &t.SubjectRelation)
+		if err != nil {
+			return nil, uuid.Nil, err
+		}
+		tuples = append(tuples, t)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, uuid.Nil, err
+	}
+
+	return tuples, cursor, nil
+
 }
 
 func (s *PostgresStorage) PrepareRuleset(object, relation string, ruleset []zanzigo.InferredRule) (zanzigo.Userdata, error) {

@@ -109,6 +109,82 @@ func (s *SQLite3Storage) Read(ctx context.Context, t zanzigo.Tuple) (uuid.UUID, 
 	return uuid.FromString(stmt.ColumnText(0))
 }
 
+func (s *SQLite3Storage) List(ctx context.Context, t zanzigo.Tuple, p zanzigo.Pagination) ([]zanzigo.Tuple, uuid.UUID, error) {
+	args := make([]string, 0, 8)
+	whereClauses := ""
+	if t.ObjectType != "" {
+		args = append(args, t.ObjectType)
+		whereClauses += "object_type=? AND "
+	}
+	if t.ObjectID != "" {
+		args = append(args, t.ObjectID)
+		whereClauses += "object_id=? AND "
+	}
+	if t.ObjectRelation != "" {
+		args = append(args, t.ObjectRelation)
+		whereClauses += "object_relation=? AND "
+	}
+	if t.SubjectType != "" {
+		args = append(args, t.SubjectType)
+		whereClauses += "subject_type=? AND "
+	}
+	if t.SubjectID != "" {
+		args = append(args, t.SubjectID)
+		whereClauses += "subject_id=? AND "
+	}
+	if t.SubjectRelation != "" {
+		args = append(args, t.SubjectRelation)
+		whereClauses += "subject_relation=? AND "
+	}
+
+	args = append(args, p.Cursor.String())
+	whereClauses += "uuid<?"
+	limit := "LIMIT ?"
+
+	conn := s.pool.Get(ctx)
+	if conn == nil {
+		return nil, uuid.Nil, ErrUnableToGetConn
+	}
+	defer s.pool.Put(conn)
+
+	stmt, err := conn.Prepare("SELECT uuid, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE " + whereClauses + " ORDER BY uuid DESC " + limit)
+	if err != nil {
+		return nil, uuid.Nil, err
+	}
+
+	for i, arg := range args {
+		stmt.BindText(i+1, arg)
+	}
+	// Lastly we add the only non string
+	stmt.BindInt64(len(args)+1, int64(p.Limit))
+
+	tuples := make([]zanzigo.Tuple, 0, p.Limit)
+	cursor := p.Cursor
+	for {
+		if hasRow, err := stmt.Step(); err != nil {
+			return nil, uuid.Nil, err
+		} else if !hasRow {
+			break
+		}
+
+		cursor, err = uuid.FromString(stmt.ColumnText(0))
+		if err != nil {
+			return nil, uuid.Nil, err
+		}
+
+		t := zanzigo.Tuple{}
+		t.ObjectType = stmt.ColumnText(1)
+		t.ObjectID = stmt.ColumnText(2)
+		t.ObjectRelation = stmt.ColumnText(3)
+		t.SubjectType = stmt.ColumnText(4)
+		t.SubjectID = stmt.ColumnText(5)
+		t.SubjectRelation = stmt.ColumnText(6)
+		tuples = append(tuples, t)
+	}
+
+	return tuples, cursor, nil
+}
+
 func (s *SQLite3Storage) PrepareRuleset(object, relation string, ruleset []zanzigo.InferredRule) (zanzigo.Userdata, error) {
 	// TODO: Checking the query plan reveals idx_tuples-index is used for all selects (this is not the case for Postgres and not expected).
 	//       This can be changed using INDEXED BY, but rather it should be verified how SQLite is supposed to plan the queries.

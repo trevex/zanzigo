@@ -4,6 +4,15 @@ package zanzigo.v1;
 
 option go_package = "github.com/trevex/zanzigo/api/zanzigo/v1;zanzigov1";
 
+
+service ZanzigoService {
+  rpc Write(WriteRequest) returns (WriteResponse) {}
+  rpc Read(ReadRequest) returns (ReadResponse) {}
+  rpc Check(CheckRequest) returns (CheckResponse) {}
+  rpc List(ListRequest) returns (ListResponse) {}
+}
+
+
 message Tuple {
   string object_type = 1;
   string object_id = 2;
@@ -35,8 +44,29 @@ message CheckResponse {
   bool result = 1;
 }
 
-service ZanzigoService {
-  rpc Write(WriteRequest) returns (WriteResponse) {}
-  rpc Read(ReadRequest) returns (ReadResponse) {}
-  rpc Check(CheckRequest) returns (CheckResponse) {}
+message Object {
+  string object_type = 1;
+  string object_id = 2;
+  string object_relation = 3;
+}
+
+message Subject {
+  string subject_type = 1;
+  string subject_id = 2;
+  string subject_relation = 3;
+}
+
+message Pagination {
+  uint32 limit = 1;
+  string cursor = 2;
+}
+
+message ListRequest {
+  Tuple filter = 1; // only set fields will be used to filter tuples
+  Pagination pagination = 2;
+}
+
+message ListResponse {
+  string cursor = 1;
+  repeated Tuple tuples = 2;
 }

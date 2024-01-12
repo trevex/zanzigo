@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/gofrs/uuid/v5"
 	"github.com/trevex/zanzigo"
 	v1 "github.com/trevex/zanzigo/api/zanzigo/v1"
 	v1connect "github.com/trevex/zanzigo/api/zanzigo/v1/zanzigov1connect"
@@ -76,6 +77,26 @@ func (h *zanzigoServiceHandler) Check(ctx context.Context, req *connect.Request[
 	}), nil
 }
 
+func (h *zanzigoServiceHandler) List(ctx context.Context, req *connect.Request[v1.ListRequest]) (*connect.Response[v1.ListResponse], error) {
+	filter := toZanzigoTuple(req.Msg.Filter) // TODO: filter tuple can be partially validated
+	pagination, err := toZanzigoPagination(req.Msg.Pagination)
+	if err != nil {
+		h.log.Debug("failed to parse cursor", slog.String("cursor", req.Msg.Pagination.Cursor))
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("malformed cursor"))
+	}
+
+	tuples, cursor, err := h.storage.List(ctx, filter, pagination)
+	if err != nil {
+		h.log.Error("failed to list tuples", slog.Any("error", err))
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to list tuples"))
+	}
+
+	return connect.NewResponse(&v1.ListResponse{
+		Tuples: toProtobufTuples(tuples),
+		Cursor: cursor.String(),
+	}), nil
+}
+
 func (h *zanzigoServiceHandler) isTupleValid(t *v1.Tuple) (zanzigo.Tuple, error) {
 	if t == nil {
 		return zanzigo.EmptyTuple, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("missing tuple"))
@@ -107,4 +128,21 @@ func toProtobufTuple(t *zanzigo.Tuple) v1.Tuple {
 		SubjectId:       t.SubjectID,
 		SubjectRelation: t.SubjectRelation,
 	}
+}
+
+func toProtobufTuples(ts []zanzigo.Tuple) []*v1.Tuple {
+	ps := make([]*v1.Tuple, 0, len(ts))
+	for _, t := range ts {
+		p := toProtobufTuple(&t)
+		ps = append(ps, &p)
+	}
+	return ps
+}
+
+func toZanzigoPagination(p *v1.Pagination) (zanzigo.Pagination, error) {
+	cursor, err := uuid.FromString(p.Cursor)
+	return zanzigo.Pagination{
+		Cursor: cursor,
+		Limit:  int(p.Limit),
+	}, err
 }
