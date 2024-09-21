@@ -100,7 +100,11 @@ func (s *PostgresStorage) Read(ctx context.Context, t zanzigo.Tuple) (uuid.UUID,
 	return uuid, err
 }
 
-func (s *PostgresStorage) List(ctx context.Context, t zanzigo.Tuple, p zanzigo.Pagination) ([]zanzigo.Tuple, uuid.UUID, error) {
+func (s *PostgresStorage) CursorStart() zanzigo.Cursor {
+	return uuid.Must(uuid.FromString("ffffffff-ffff-ffff-ffff-ffffffffffff")).Bytes()
+}
+
+func (s *PostgresStorage) List(ctx context.Context, t zanzigo.Tuple, p zanzigo.Pagination) ([]zanzigo.Tuple, zanzigo.Cursor, error) {
 	args := make([]any, 0, 8)
 	whereClauses := ""
 	if t.ObjectType != "" {
@@ -128,7 +132,11 @@ func (s *PostgresStorage) List(ctx context.Context, t zanzigo.Tuple, p zanzigo.P
 		whereClauses += "subject_relation=$" + strconv.Itoa(len(args)) + " AND "
 	}
 
-	args = append(args, p.Cursor)
+	cursor, err := uuid.FromBytes(p.Cursor)
+	if err != nil {
+		return nil, nil, err
+	}
+	args = append(args, cursor)
 	whereClauses += "uuid<$" + strconv.Itoa(len(args))
 
 	args = append(args, p.Limit)
@@ -136,27 +144,26 @@ func (s *PostgresStorage) List(ctx context.Context, t zanzigo.Tuple, p zanzigo.P
 
 	rows, err := s.pool.Query(ctx, "SELECT uuid, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE "+whereClauses+" ORDER BY uuid DESC "+limit, args...)
 	if err != nil {
-		return nil, uuid.Nil, err
+		return nil, nil, err
 	}
 	defer rows.Close()
 
 	tuples := make([]zanzigo.Tuple, 0, p.Limit)
-	cursor := p.Cursor
 
 	for rows.Next() {
 		var t zanzigo.Tuple
 		err := rows.Scan(&cursor, &t.ObjectType, &t.ObjectID, &t.ObjectRelation, &t.SubjectType, &t.SubjectID, &t.SubjectRelation)
 		if err != nil {
-			return nil, uuid.Nil, err
+			return nil, nil, err
 		}
 		tuples = append(tuples, t)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, uuid.Nil, err
+		return nil, nil, err
 	}
 
-	return tuples, cursor, nil
-
+	// We use UUIDv7, so we can directly use it as cursor as it is sequential
+	return tuples, cursor.Bytes(), nil
 }
 
 func (s *PostgresStorage) PrepareRuleset(object, relation string, ruleset []zanzigo.InferredRule) (zanzigo.Userdata, error) {

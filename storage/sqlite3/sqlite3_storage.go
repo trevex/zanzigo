@@ -109,7 +109,11 @@ func (s *SQLite3Storage) Read(ctx context.Context, t zanzigo.Tuple) (uuid.UUID, 
 	return uuid.FromString(stmt.ColumnText(0))
 }
 
-func (s *SQLite3Storage) List(ctx context.Context, t zanzigo.Tuple, p zanzigo.Pagination) ([]zanzigo.Tuple, uuid.UUID, error) {
+func (s *SQLite3Storage) CursorStart() zanzigo.Cursor {
+	return uuid.Must(uuid.FromString("ffffffff-ffff-ffff-ffff-ffffffffffff")).Bytes()
+}
+
+func (s *SQLite3Storage) List(ctx context.Context, t zanzigo.Tuple, p zanzigo.Pagination) ([]zanzigo.Tuple, zanzigo.Cursor, error) {
 	args := make([]string, 0, 8)
 	whereClauses := ""
 	if t.ObjectType != "" {
@@ -137,19 +141,23 @@ func (s *SQLite3Storage) List(ctx context.Context, t zanzigo.Tuple, p zanzigo.Pa
 		whereClauses += "subject_relation=? AND "
 	}
 
-	args = append(args, p.Cursor.String())
+	cursor, err := uuid.FromBytes(p.Cursor)
+	if err != nil {
+		return nil, nil, err
+	}
+	args = append(args, cursor.String())
 	whereClauses += "uuid<?"
 	limit := "LIMIT ?"
 
 	conn := s.pool.Get(ctx)
 	if conn == nil {
-		return nil, uuid.Nil, ErrUnableToGetConn
+		return nil, nil, ErrUnableToGetConn
 	}
 	defer s.pool.Put(conn)
 
 	stmt, err := conn.Prepare("SELECT uuid, object_type, object_id, object_relation, subject_type, subject_id, subject_relation FROM tuples WHERE " + whereClauses + " ORDER BY uuid DESC " + limit)
 	if err != nil {
-		return nil, uuid.Nil, err
+		return nil, nil, err
 	}
 
 	for i, arg := range args {
@@ -159,17 +167,16 @@ func (s *SQLite3Storage) List(ctx context.Context, t zanzigo.Tuple, p zanzigo.Pa
 	stmt.BindInt64(len(args)+1, int64(p.Limit))
 
 	tuples := make([]zanzigo.Tuple, 0, p.Limit)
-	cursor := p.Cursor
 	for {
 		if hasRow, err := stmt.Step(); err != nil {
-			return nil, uuid.Nil, err
+			return nil, nil, err
 		} else if !hasRow {
 			break
 		}
 
 		cursor, err = uuid.FromString(stmt.ColumnText(0))
 		if err != nil {
-			return nil, uuid.Nil, err
+			return nil, nil, err
 		}
 
 		t := zanzigo.Tuple{}
@@ -182,7 +189,7 @@ func (s *SQLite3Storage) List(ctx context.Context, t zanzigo.Tuple, p zanzigo.Pa
 		tuples = append(tuples, t)
 	}
 
-	return tuples, cursor, nil
+	return tuples, cursor.Bytes(), nil
 }
 
 func (s *SQLite3Storage) PrepareRuleset(object, relation string, ruleset []zanzigo.InferredRule) (zanzigo.Userdata, error) {

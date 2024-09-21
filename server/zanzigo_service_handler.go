@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/gofrs/uuid/v5"
 	"github.com/trevex/zanzigo"
 	v1 "github.com/trevex/zanzigo/api/zanzigo/v1"
 	v1connect "github.com/trevex/zanzigo/api/zanzigo/v1/zanzigov1connect"
@@ -93,7 +92,7 @@ func (h *zanzigoServiceHandler) List(ctx context.Context, req *connect.Request[v
 
 	return connect.NewResponse(&v1.ListResponse{
 		Tuples: toProtobufTuples(tuples),
-		Cursor: cursor.String(),
+		Cursor: string(cursor),
 	}), nil
 }
 
@@ -140,9 +139,8 @@ func toProtobufTuples(ts []zanzigo.Tuple) []*v1.Tuple {
 }
 
 func toZanzigoPagination(p *v1.Pagination) (zanzigo.Pagination, error) {
-	cursor, err := uuid.FromString(p.Cursor)
 	return zanzigo.Pagination{
-		Cursor: cursor,
+		Cursor: []byte(p.Cursor),
 		Limit:  int(p.Limit),
-	}, err
+	}, nil
 }

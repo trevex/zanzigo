@@ -41,9 +41,68 @@ func (s *PebbleStorage) Read(ctx context.Context, t zanzigo.Tuple) (uuid.UUID, e
 	return id, nil
 }
 
-func (s *PebbleStorage) List(ctx context.Context, t zanzigo.Tuple, p zanzigo.Pagination) ([]zanzigo.Tuple, uuid.UUID, error) {
-	// TODO: cursor of type uuid kind of doesn't fit... []byte?
-	return nil, uuid.UUID{}, nil
+func (s *PebbleStorage) CursorStart() zanzigo.Cursor {
+	return []byte("")
+}
+
+func (s *PebbleStorage) List(ctx context.Context, t zanzigo.Tuple, p zanzigo.Pagination) ([]zanzigo.Tuple, zanzigo.Cursor, error) {
+	prefix := ""
+	fieldErr := fmt.Errorf("Pebble List implementation only allows listing for valid prefixes in tuple string notation: %v", t)
+
+	if t.ObjectType != "" {
+		prefix += t.ObjectType + ":"
+	} else if t.ObjectID != "" || t.ObjectRelation != "" || t.SubjectType != "" || t.SubjectID != "" || t.SubjectRelation != "" {
+		return nil, nil, fieldErr
+	}
+	if t.ObjectType != "" {
+		prefix += t.ObjectID + "#"
+	} else if t.ObjectRelation != "" || t.SubjectType != "" || t.SubjectID != "" || t.SubjectRelation != "" {
+		return nil, nil, fieldErr
+	}
+	if t.ObjectRelation != "" {
+		prefix += t.ObjectRelation + "@"
+	} else if t.SubjectType != "" || t.SubjectID != "" || t.SubjectRelation != "" {
+		return nil, nil, fieldErr
+	}
+	if t.SubjectType != "" {
+		prefix += t.SubjectType + ":"
+	} else if t.SubjectID != "" || t.SubjectRelation != "" {
+		return nil, nil, fieldErr
+	}
+	if t.SubjectID != "" {
+		prefix += t.SubjectID // TODO: might find too much, we should add an "end" character
+	} else if t.SubjectRelation != "" {
+		return nil, nil, fieldErr
+	}
+	if t.SubjectRelation != "" {
+		prefix += "#" + t.SubjectRelation
+	}
+
+	iterOpts := prefixIterOptions([]byte(prefix))
+	if len(p.Cursor) > 0 {
+		iterOpts.LowerBound = p.Cursor
+	}
+	iter, err := s.db.NewIter(iterOpts)
+	if err != nil {
+		return nil, nil, err
+	}
+	i := p.Limit
+	cursor := p.Cursor
+	tuples := make([]zanzigo.Tuple, 0, p.Limit)
+	for iter.First(); iter.Valid(); iter.Next() {
+		cursor = iter.Key()
+		t := zanzigo.TupleString(string(cursor))
+		tuples = append(tuples, t)
+		i -= 1
+		if i == 0 {
+			break
+		}
+	}
+	if err := iter.Close(); err != nil {
+		return nil, nil, err
+	}
+
+	return tuples, keyUpperBound(cursor), nil
 }
 
 func (s *PebbleStorage) PrepareRuleset(object, relation string, ruleset []zanzigo.InferredRule) (zanzigo.Userdata, error) {
