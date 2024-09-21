@@ -1,6 +1,7 @@
 package zanzigo
 
 import (
+	"fmt"
 	"strings"
 )
 
@@ -19,6 +20,14 @@ type Tuple struct {
 }
 
 var EmptyTuple = Tuple{}
+
+func (t *Tuple) ToString() string {
+	s := fmt.Sprintf("%s:%s#%s@%s:%s", t.ObjectType, t.ObjectID, t.ObjectRelation, t.SubjectType, t.SubjectID)
+	if t.SubjectRelation != "" {
+		s += "#" + t.SubjectRelation
+	}
+	return s
+}
 
 // Parses a string in Zanzibar-format and returns the resulting tuple.
 // If the string is malformed, EmptyTuple will be returned.

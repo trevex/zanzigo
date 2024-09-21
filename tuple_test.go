@@ -7,7 +7,8 @@ import (
 )
 
 func TestTupleString(t *testing.T) {
-	t1 := TupleString("doc:mydoc#viewer@user:myuser")
+	input1 := "doc:mydoc#viewer@user:myuser"
+	t1 := TupleString(input1)
 	require.Equal(t, Tuple{
 		ObjectType:     "doc",
 		ObjectID:       "mydoc",
@@ -15,8 +16,11 @@ func TestTupleString(t *testing.T) {
 		SubjectType:    "user",
 		SubjectID:      "myuser",
 	}, t1)
+	out1 := t1.ToString()
+	require.Equal(t, input1, out1)
 
-	t2 := TupleString("doc:mydoc#editor@group:mygroup#member")
+	input2 := "doc:mydoc#editor@group:mygroup#member"
+	t2 := TupleString(input2)
 	require.Equal(t, Tuple{
 		ObjectType:      "doc",
 		ObjectID:        "mydoc",
@@ -25,4 +29,6 @@ func TestTupleString(t *testing.T) {
 		SubjectID:       "mygroup",
 		SubjectRelation: "member",
 	}, t2)
+	out2 := t2.ToString()
+	require.Equal(t, input2, out2)
 }

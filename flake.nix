@@ -32,9 +32,9 @@
             protobuf
             protoc-gen-go
             protoc-gen-connect-go
-            # for bench
-            terraform
-            google-cloud-sdk
+            # for bench:
+            # terraform
+            # google-cloud-sdk
           ];
         };
       }
